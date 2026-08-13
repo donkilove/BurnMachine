@@ -22,6 +22,7 @@ public sealed class SerialPortChannel : ISerialChannel
             WriteTimeout = 2000,
         };
         _port.Open();
+        _port.DiscardInBuffer();   // 审核修复：清打开时驱动缓冲残留（设备上电噪声/上次会话数据）
     }
 
     public void Write(string text)

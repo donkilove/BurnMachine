@@ -38,6 +38,7 @@ public sealed class BurnWorker
                 _status?.Invoke($"尝试打开烧录机串口 {request.BurnSerial}，第 {retry + 1}/{MaxRetries} 次");
                 ser = _channelFactory();
                 ser.Open(request.BurnSerial, _baudRate);
+                ser.ResetInputBuffer();   // 审核修复：清打开时驱动缓冲残留（设备上电噪声/上次会话数据）
 
                 ser.Write(BurnProtocol.BuildClearCommand(request.BurnId));
                 await Task.Delay(100, ct);
@@ -48,6 +49,7 @@ public sealed class BurnWorker
                 await Task.Delay(TimeSpan.FromSeconds(request.BurnTimeSeconds), ct);
 
                 ser.Write(BurnProtocol.BuildQueryCommand(request.BurnId));
+                ser.ResetInputBuffer();   // 审核修复：清查询前累积的残留帧头，防复用通道/残留字节污染本次解析
                 await Task.Delay(500, ct);
 
                 var response = await ReadResponseAsync(ser, ct);
@@ -78,13 +80,31 @@ public sealed class BurnWorker
             }
             finally
             {
-                if (ser is { IsOpen: true })
+                if (ser is not null)
                 {
-                    ser.Close();
-                    _status?.Invoke($"已关闭烧录机串口 {request.BurnSerial}");
-                }
+                    try
+                    {
+                        if (ser.IsOpen)
+                        {
+                            ser.Close();
+                            _status?.Invoke($"已关闭烧录机串口 {request.BurnSerial}");
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        // 审核修复：关闭/释放异常属收尾噪音，不得逃逸破坏返回值，也不触发重试
+                        _status?.Invoke($"关闭烧录机串口异常: {e.Message}");
+                    }
 
-                ser?.Dispose();
+                    try
+                    {
+                        ser.Dispose();
+                    }
+                    catch (Exception e)
+                    {
+                        _status?.Invoke($"释放烧录机串口异常: {e.Message}");
+                    }
+                }
             }
         }
 
