@@ -1,10 +1,11 @@
+using System.Diagnostics;
 using System.Text;
 using BurnMachine.Channel;
 
 namespace BurnMachine;
 
 /// <summary>
-/// 单点烧录执行器：按 XW16Pro 协议执行 清空→烧录→查询 时序（含打开失败重试 2 次）。
+/// 单点烧录执行器：按 XW16Pro 协议执行 清空→烧录→查询 时序（整轮最多尝试 2 次）。
 /// 响应读取用累积缓冲 + 换行帧切分（修复 BurnMachineHost 原版粘包/半包问题）。
 /// </summary>
 public sealed class BurnWorker
@@ -71,7 +72,7 @@ public sealed class BurnWorker
                 if (retry < MaxRetries - 1)
                 {
                     _status?.Invoke($"等待 {RetryDelayMs / 1000.0:0} 秒后重试...");
-                    await DelayOrCancel(ct);
+                    await Task.Delay(RetryDelayMs, ct);
                 }
                 else
                 {
@@ -108,7 +109,8 @@ public sealed class BurnWorker
             }
         }
 
-        return new BurnOutcome(false, BurnResultKind.Error, "烧录失败");
+        // 语义上不可达：循环内必然 return（成功/失败结果）或 throw（取消）；保留语句仅为通过编译
+        throw new UnreachableException("ExecuteAsync 循环内必然返回或抛出");
     }
 
     /// <summary>
@@ -140,17 +142,5 @@ public sealed class BurnWorker
         }
 
         return sb.ToString().Trim();
-    }
-
-    private static async Task DelayOrCancel(CancellationToken ct)
-    {
-        try
-        {
-            await Task.Delay(RetryDelayMs, ct);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
     }
 }
