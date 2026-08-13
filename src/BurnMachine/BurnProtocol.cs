@@ -26,15 +26,25 @@ public static class BurnProtocol
 
     /// <summary>清空指令：`F{burnId}|00000001\r\n</summary>
     public static string BuildClearCommand(string burnId)
-        => $"`F{burnId}|00000001\r\n";
+    {
+        ValidateBurnId(burnId);
+        return $"`F{burnId}|00000001\r\n";
+    }
 
     /// <summary>烧录指令：`P{burnId}|00000001|{burnProgram}\r\n</summary>
     public static string BuildBurnCommand(string burnId, string burnProgram)
-        => $"`P{burnId}|00000001|{burnProgram}\r\n";
+    {
+        ValidateBurnId(burnId);
+        ValidateBurnProgram(burnProgram);
+        return $"`P{burnId}|00000001|{burnProgram}\r\n";
+    }
 
     /// <summary>查询指令：`C{burnId}00000001\r\n（注意：无 | 分隔）</summary>
     public static string BuildQueryCommand(string burnId)
-        => $"`C{burnId}00000001\r\n";
+    {
+        ValidateBurnId(burnId);
+        return $"`C{burnId}00000001\r\n";
+    }
 
     /// <summary>
     /// 解析烧录机响应（输入已按帧切分；此处先 trim 再判定）。
@@ -98,5 +108,42 @@ public static class BurnProtocol
 
         detail = "烧录失败";
         return BurnResultKind.Failure;
+    }
+
+    // ---- 输入校验（审核修复：严格设备字段规则，指令构造与 BurnRequest 共用） ----
+
+    /// <summary>烧录等待时间下界（秒）</summary>
+    public const double MinBurnTimeSeconds = 0.1;
+
+    /// <summary>烧录等待时间上界（秒）</summary>
+    public const double MaxBurnTimeSeconds = 600;
+
+    /// <summary>校验烧录机 ID：8 位十进制数字（设备手册序列号字段规则）</summary>
+    internal static void ValidateBurnId(string burnId)
+    {
+        if (burnId is null || burnId.Length != 8 || !burnId.All(c => c is >= '0' and <= '9'))
+        {
+            throw new ArgumentException("烧录机ID必须为8位十进制数字", nameof(burnId));
+        }
+    }
+
+    /// <summary>校验烧录程序位号：4 位十进制数字（设备镜像号字段规则）</summary>
+    internal static void ValidateBurnProgram(string burnProgram)
+    {
+        if (burnProgram is null || burnProgram.Length != 4 || !burnProgram.All(char.IsAsciiDigit))
+        {
+            throw new ArgumentException("烧录程序位号必须为4位十进制数字", nameof(burnProgram));
+        }
+    }
+
+    /// <summary>校验烧录等待时间：finite 且 0.1~600 秒（与上位机 BurnConfig 规则一致）</summary>
+    internal static void ValidateBurnTime(double burnTimeSeconds)
+    {
+        if (!double.IsFinite(burnTimeSeconds)
+            || burnTimeSeconds < MinBurnTimeSeconds
+            || burnTimeSeconds > MaxBurnTimeSeconds)
+        {
+            throw new ArgumentOutOfRangeException(nameof(burnTimeSeconds), "烧录时间必须在0.1-600秒之间");
+        }
     }
 }

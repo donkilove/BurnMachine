@@ -133,4 +133,36 @@ public class BurnProtocolTests
         BurnProtocol.ParseResponse(Ok("1"), BurnId, out var failDetail);
         Assert.Equal("烧录失败", failDetail);
     }
+
+    // ---- 审核修复：指令构造输入校验（严格设备字段规则） ----
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("123")]
+    [InlineData("008812899")]
+    [InlineData("00A81289")]
+    [InlineData("0088 289")]
+    public void BuildClearCommand_InvalidBurnId_Throws(string burnId)
+        => Assert.Throws<ArgumentException>(() => BurnProtocol.BuildClearCommand(burnId));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("12")]
+    [InlineData("AB12")]
+    [InlineData("07651")]
+    public void BuildBurnCommand_InvalidBurnProgram_Throws(string program)
+        => Assert.Throws<ArgumentException>(() => BurnProtocol.BuildBurnCommand(BurnId, program));
+
+    [Fact]
+    public void BuildQueryCommand_InvalidBurnId_Throws()
+        => Assert.Throws<ArgumentException>(() => BurnProtocol.BuildQueryCommand("00A81289"));
+
+    [Fact]
+    public void BuildCommands_ValidInputs_Unchanged()
+    {
+        Assert.Equal("`F00881289|00000001\r\n", BurnProtocol.BuildClearCommand(BurnId));
+        Assert.Equal("`P00881289|00000001|0765\r\n", BurnProtocol.BuildBurnCommand(BurnId, "0765"));
+        Assert.Equal("`C0088128900000001\r\n", BurnProtocol.BuildQueryCommand(BurnId));
+    }
 }
+
