@@ -12,6 +12,8 @@
     <PackageId>BurnMachine</PackageId>
     <Authors>donkilove</Authors>
     <Description>A .NET library for the XW16Pro burn-machine serial protocol (9600 8N1): clear/burn/query command building, response parsing, and the single-position burn worker.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/donkilove/BurnMachine</RepositoryUrl>
     <PackageTags>serial;burn;programmer;xw16pro;iot</PackageTags>
@@ -21,6 +23,11 @@
 
   <ItemGroup>
     <PackageReference Include="System.IO.Ports" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>
