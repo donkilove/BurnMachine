@@ -11,7 +11,7 @@
 
 - **指令构造** —— 清空（`` `F ``）/ 烧录（`` `P ``）/ 查询（`` `C ``）指令按协议规格生成
 - **响应解析** —— 五段帧校验、回显序列号校验（防串扰/粘包错位）、结果码精确匹配（0=成功）、帧长上限 256
-- **单点烧录执行器 `BurnWorker`** —— 清空→烧录→查询完整时序，打开失败自动重试 2 次，协作式取消
+- **单点烧录执行器 `BurnWorker`** —— 清空→烧录→查询完整时序，整轮最多尝试 2 次（失败自动重试 1 次，间隔 1 秒），协作式取消
 - **粘包/半包防护** —— 累积缓冲 + 换行帧切分，粘包只取第一帧，半包累积到帧边界
 - **可注入串口通道** —— `ISerialChannel` 抽象 + `SerialPortChannel`（System.IO.Ports）真实实现 + `MockSerialChannel` 可编程模拟（离线开发/测试）
 
@@ -76,7 +76,7 @@ src/BurnMachine/            类库（net8.0，NuGet 包 BurnMachine）
     ├── ISerialChannel.cs   通道抽象（可注入自定义实现）
     ├── SerialPortChannel.cs System.IO.Ports 实现
     └── MockSerialChannel.cs 可编程模拟通道
-tests/BurnMachine.Tests/     协议 + 执行器测试（23 个）
+tests/BurnMachine.Tests/     协议 + 执行器测试（55 个）
 ```
 
 ## 许可协议
