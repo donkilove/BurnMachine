@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace BurnMachine;
 
 /// <summary>烧录机响应结果类型（与 BurnMachineHost 原版解析分支一一对应）</summary>
@@ -46,6 +48,168 @@ public static class BurnProtocol
         return $"`C{burnId}00000001\r\n";
     }
 
+    // ==================== v0.2.0 新增（向后兼容：既有方法签名不变） ====================
+
+    /// <summary>清空指令（指定通道）：`F{burnId}|{通道掩码8hex}\r\n</summary>
+    public static string BuildClearCommand(string burnId, ChannelMask channels)
+    {
+        ValidateBurnId(burnId);
+        return $"`F{burnId}|{FormatChannelMask(channels)}\r\n";
+    }
+
+    /// <summary>查询指令（指定通道）：`C{burnId}{通道掩码8hex}\r\n（注意：无 | 分隔）</summary>
+    public static string BuildQueryCommand(string burnId, ChannelMask channels)
+    {
+        ValidateBurnId(burnId);
+        return $"`C{burnId}{FormatChannelMask(channels)}\r\n";
+    }
+
+    /// <summary>烧录指令（指定通道，可选条码）：`P{burnId}|{掩码}|{镜像号}[|{条码hex}]\r\n</summary>
+    /// <param name="burnId">烧录机 ID（8 位十进制数字）</param>
+    /// <param name="burnProgram">烧录程序位号（4 位十进制数字）</param>
+    /// <param name="channels">烧录通道掩码</param>
+    /// <param name="barcode">条码字节（每字节转 2 位大写 hex；大小端由镜像配置决定，库不处理）；null/空省略字段</param>
+    public static string BuildBurnCommand(string burnId, string burnProgram, ChannelMask channels, byte[]? barcode = null)
+    {
+        ValidateBurnId(burnId);
+        ValidateBurnProgram(burnProgram);
+        var cmd = $"`P{burnId}|{FormatChannelMask(channels)}|{burnProgram}";
+        if (barcode is { Length: > 0 })
+        {
+            cmd += $"|{ConvertBarcodeToHex(barcode)}";
+        }
+
+        return cmd + "\r\n";
+    }
+
+    /// <summary>UID 扩展查询指令：`U{burnId}{通道掩码8hex}\r\n（注意：无 | 分隔，与 C 命令一致）</summary>
+    public static string BuildUidQueryCommand(string burnId, ChannelMask channels = ChannelMask.A)
+    {
+        ValidateBurnId(burnId);
+        return $"`U{burnId}{FormatChannelMask(channels)}\r\n";
+    }
+
+    /// <summary>
+    /// 解析烧录机响应并输出结构化详情（C 命令回复）。
+    /// 判定语义与 <see cref="ParseResponse(string?, string, out string)"/> 完全一致（Kind/Detail），
+    /// 额外解析镜像号/主校验和/剩余次数/结果码（见 <see cref="BurnResult"/>）。
+    /// </summary>
+    public static BurnResult ParseResponseDetailed(string? response, string burnId)
+        => ParseDetailedCore(response, burnId, 'C');
+
+    /// <summary>
+    /// 解析 UID 扩展查询响应（U 命令回复）：前 6 段与 C 回复同构，第 7 段为 UID 区（固定 50 字符）。
+    /// 需要固件版本 &gt; 20240103000000 才支持。第 7 段缺失 → Kind=FormatError 且 Uid=null；
+    /// 第 7 段内容畸形/数据不足 → 仅 Uid=null（不抛异常）。
+    /// </summary>
+    public static UidQueryResult ParseUidResponse(string? response, string burnId)
+    {
+        var baseResult = ParseDetailedCore(response, burnId, 'U');
+        if (baseResult.Kind is not (BurnResultKind.Success or BurnResultKind.Failure))
+        {
+            return new UidQueryResult(baseResult, null);
+        }
+
+        var parts = response!.Trim().Split('|');
+        if (parts.Length < 7)
+        {
+            return new UidQueryResult(
+                new BurnResult(BurnResultKind.FormatError, "响应格式错误：UID区缺失", null, null, null, null), null);
+        }
+
+        return new UidQueryResult(baseResult, TryParseUidZone(parts[6]));
+    }
+
+    // ---- v0.2.0 内部实现 ----
+
+    /// <summary>通道掩码 → 8 位大写十六进制（A=00000001、B=00000002、Both=00000003）</summary>
+    private static string FormatChannelMask(ChannelMask channels) => ((uint)channels).ToString("X8");
+
+    /// <summary>条码字节 → 大写 hex 字符串（每字节 2 字符）</summary>
+    private static string ConvertBarcodeToHex(byte[] barcode)
+    {
+        var sb = new System.Text.StringBuilder(barcode.Length * 2);
+        foreach (var b in barcode)
+        {
+            sb.Append(b.ToString("X2"));
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 详情解析核心（C/U 共用）：判定语义与既有 ParseResponse 一致，成功/失败时补充详情字段。
+    /// 详情字段宽松解析：缺段/畸形一律 null，不改变 Kind 判定。
+    /// </summary>
+    private static BurnResult ParseDetailedCore(string? response, string burnId, char commandChar)
+    {
+        var kind = ParseCore(response, burnId, commandChar, out var detail);
+        if (kind is not (BurnResultKind.Success or BurnResultKind.Failure))
+        {
+            return new BurnResult(kind, detail, null, null, null, null);
+        }
+
+        var parts = response!.Trim().Split('|');
+        return new BurnResult(
+            kind,
+            detail,
+            TryParseImageNo(parts.Length > 2 ? parts[2] : null),
+            TryParseChecksum(parts.Length > 3 ? parts[3] : null),
+            TryParseRemaining(parts.Length >= 6 ? parts[4] : null),   // 5 段旧格式时 parts[4] 为结果码，不当作剩余次数
+            TryParseStatus(parts.Length >= 6 ? parts[5] : parts[^1]));
+    }
+
+    /// <summary>镜像号：4 位十进制；9999（未烧录过）或解析失败 → null</summary>
+    private static int? TryParseImageNo(string? s)
+        => int.TryParse(s, NumberStyles.None, CultureInfo.InvariantCulture, out var v) && v != 9999 ? v : null;
+
+    /// <summary>主校验和：8 位十六进制；FFFFFFFF 或解析失败 → null</summary>
+    private static uint? TryParseChecksum(string? s)
+        => uint.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var v) && v != 0xFFFFFFFF ? v : null;
+
+    /// <summary>剩余次数：16 位十六进制；FFFFFFFFFFFFFFFF（无限次，.NET 解析为 -1）或解析失败 → null</summary>
+    private static long? TryParseRemaining(string? s)
+        => long.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var v) && v >= 0 ? v : null;
+
+    /// <summary>结果码：0/1/2/3；其它（含畸形）→ null</summary>
+    private static BurnStatus? TryParseStatus(string s)
+        => s switch
+        {
+            "0" => BurnStatus.Success,
+            "1" => BurnStatus.Failed,
+            "2" => BurnStatus.Cleared,
+            "3" => BurnStatus.NoRecord,
+            _ => null,
+        };
+
+    /// <summary>
+    /// UID 区解析：前 2 位为 UID 长度（十六进制字节数），随后为该长度的 UID 数据，其余无意义。
+    /// 数据不足/非法 hex → null（不抛异常）。
+    /// </summary>
+    private static byte[]? TryParseUidZone(string zone)
+    {
+        if (zone.Length < 2
+            || !int.TryParse(zone[..2], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var length))
+        {
+            return null;
+        }
+
+        var hexLength = length * 2;
+        if (zone.Length < 2 + hexLength)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Convert.FromHexString(zone.Substring(2, hexLength));
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// 解析烧录机响应（输入已按帧切分；此处先 trim 再判定）。
     /// </summary>
@@ -53,6 +217,13 @@ public static class BurnProtocol
     /// <param name="burnId">本次查询使用的烧录机 ID（审核修复：校验响应回显序列号，防粘包错位/串扰）</param>
     /// <param name="detail">状态栏文本（与 BurnMachineHost 原版中文提示一致）</param>
     public static BurnResultKind ParseResponse(string? response, string burnId, out string detail)
+        => ParseCore(response, burnId, 'C', out detail);
+
+    /// <summary>
+    /// 解析核心（C/U 共用）：判定语义与既有 ParseResponse 完全一致。
+    /// v0.2.0 重构：命令字参数化，供 UID 查询（U 命令）复用回显校验，避免两处逻辑漂移。
+    /// </summary>
+    private static BurnResultKind ParseCore(string? response, string burnId, char commandChar, out string detail)
     {
         detail = "";
         response = response?.Trim();
@@ -81,17 +252,17 @@ public static class BurnProtocol
             return BurnResultKind.FormatError;
         }
 
-        // 回显序列号校验：首段应为 `C + 8 位序列号，且与本次查询的 burn_id 一致
+        // 回显序列号校验：首段应为 `{命令字} + 8 位序列号，且与本次查询的 burn_id 一致
         // （设备对查询回显请求中的序列号，校验可确认响应属于本次查询，防串扰/粘包错位）
         var first = parts[0];
-        var echoedId = first.Length >= 10 && first[0] == '`' && first[1] == 'C' ? first[2..] : null;
+        var echoedId = first.Length >= 10 && first[0] == '`' && first[1] == commandChar ? first[2..] : null;
         if (echoedId is null || echoedId.Length != 8 || echoedId != burnId)
         {
             detail = "响应格式错误：回显序列号不匹配";
             return BurnResultKind.FormatError;
         }
 
-        var last = parts[^1];
+        var last = parts.Length >= 6 ? parts[5] : parts[^1];   // 结果码固定在第 6 段；5 段旧格式时为末段（U 回复第 7 段为 UID 区，不算结果码）
         if (last.Length == 0)
         {
             // 原版 parts[-1][0] 对空串抛 IndexError，被 except 捕获 → Error

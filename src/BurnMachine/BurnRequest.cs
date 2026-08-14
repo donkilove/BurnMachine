@@ -18,6 +18,12 @@ public sealed record BurnRequest
     /// <summary>烧录等待时间（秒，0.1~600）</summary>
     public double BurnTimeSeconds { get; }
 
+    /// <summary>烧录通道（v0.2.0 新增；默认 A 通道，行为与 v0.1.1 一致）</summary>
+    public ChannelMask Channels { get; init; } = ChannelMask.A;
+
+    /// <summary>烧录时写入的条码字节（v0.2.0 新增；默认 null 不写条码；大小端由镜像配置决定）</summary>
+    public byte[]? Barcode { get; init; }
+
     public BurnRequest(string burnSerial, string burnId, string burnProgram, double burnTimeSeconds)
     {
         if (string.IsNullOrWhiteSpace(burnSerial))

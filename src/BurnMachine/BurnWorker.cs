@@ -41,15 +41,15 @@ public sealed class BurnWorker
                 ser.Open(request.BurnSerial, _baudRate);
                 ser.ResetInputBuffer();   // 审核修复：清打开时驱动缓冲残留（设备上电噪声/上次会话数据）
 
-                ser.Write(BurnProtocol.BuildClearCommand(request.BurnId));
+                ser.Write(BurnProtocol.BuildClearCommand(request.BurnId, request.Channels));
                 await Task.Delay(100, ct);
 
-                ser.Write(BurnProtocol.BuildBurnCommand(request.BurnId, request.BurnProgram));
+                ser.Write(BurnProtocol.BuildBurnCommand(request.BurnId, request.BurnProgram, request.Channels, request.Barcode));
 
                 _status?.Invoke($"等待烧录时间: {request.BurnTimeSeconds}秒");
                 await Task.Delay(TimeSpan.FromSeconds(request.BurnTimeSeconds), ct);
 
-                ser.Write(BurnProtocol.BuildQueryCommand(request.BurnId));
+                ser.Write(BurnProtocol.BuildQueryCommand(request.BurnId, request.Channels));
                 ser.ResetInputBuffer();   // 审核修复：清查询前累积的残留帧头，防复用通道/残留字节污染本次解析
                 await Task.Delay(500, ct);
 
@@ -111,6 +111,53 @@ public sealed class BurnWorker
 
         // 语义上不可达：循环内必然 return（成功/失败结果）或 throw（取消）；保留语句仅为通过编译
         throw new UnreachableException("ExecuteAsync 循环内必然返回或抛出");
+    }
+
+    /// <summary>
+    /// UID 扩展查询（v0.2.0 新增）：发送 U 命令并解析 UID 查询回复。
+    /// 需要设备固件版本 &gt; 20240103000000 才支持（旧固件设备无回复 → 结果 Kind=NoResponse）。
+    /// 串口打开失败等环境异常直接上抛（不做重试）。
+    /// </summary>
+    /// <param name="burnSerial">烧录机串口号（如 COM3）</param>
+    /// <param name="burnId">烧录机 ID（8 位十进制数字）</param>
+    /// <param name="channels">查询通道（默认 A）</param>
+    /// <param name="ct">取消令牌</param>
+    public async Task<UidQueryResult> QueryUidAsync(
+        string burnSerial, string burnId, ChannelMask channels = ChannelMask.A, CancellationToken ct = default)
+    {
+        var ser = _channelFactory();
+        try
+        {
+            _status?.Invoke($"打开烧录机串口 {burnSerial} 执行 UID 查询");
+            ser.Open(burnSerial, _baudRate);
+            ser.ResetInputBuffer();
+
+            ser.Write(BurnProtocol.BuildUidQueryCommand(burnId, channels));
+            await Task.Delay(500, ct);
+
+            var response = await ReadResponseAsync(ser, ct);
+            if (!string.IsNullOrEmpty(response))
+            {
+                _status?.Invoke($"收到响应: {response}");
+            }
+
+            return BurnProtocol.ParseUidResponse(response, burnId);
+        }
+        finally
+        {
+            if (ser is not null)
+            {
+                try
+                {
+                    ser.Dispose();
+                }
+                catch (Exception e)
+                {
+                    // 收尾噪音：不得逃逸破坏返回值
+                    _status?.Invoke($"释放烧录机串口异常: {e.Message}");
+                }
+            }
+        }
     }
 
     /// <summary>

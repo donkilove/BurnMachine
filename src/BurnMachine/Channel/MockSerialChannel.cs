@@ -53,7 +53,7 @@ public sealed class MockSerialChannel : ISerialChannel
     public void Write(string text)
     {
         _writes.Add(text);
-        if (text.StartsWith("`C"))   // 查询指令：设备将响应
+        if (text.StartsWith("`C") || text.StartsWith("`U"))   // 查询指令（含 UID 扩展查询）：设备将响应
         {
             _queryReceived = true;
         }
@@ -89,7 +89,5 @@ public sealed class MockSerialChannel : ISerialChannel
 
     public void Close() => IsOpen = false;
 
-    public void Dispose()
-    {
-    }
+    public void Dispose() => Close();   // 与 SerialPortChannel 语义对齐：释放即关闭
 }
