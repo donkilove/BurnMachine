@@ -5,7 +5,7 @@ using Xunit;
 namespace BurnMachine.Tests;
 
 /// <summary>
-/// 轮询等待模式（BurnWaitMode.Polling）测试。
+/// 轮询等待模式（v0.6.0 起为唯一烧录等待方式）测试。
 /// 终止语义由真实硬件实测确认（COM3 / 00911008 / 镜像 0000）：
 /// 烧录进行中 C 查询返回结果码 2（已清空），烧录完成变 0；轮询不干扰烧录。
 /// 轮询循环：结果码 0/1 判定完成，2/3 与无响应/无效帧继续，超时判失败。
@@ -45,7 +45,7 @@ public class BurnWorkerPollingTests
 
         // 不传间隔/超时：使用默认值 100ms / 3500ms
         var outcome = await worker.ExecuteAsync(
-            NewRequest(), CancellationToken.None, BurnWaitMode.Polling);
+            NewRequest(), CancellationToken.None);
 
         Assert.True(outcome.Success);
         Assert.Equal(2, port.Writes.Count(w => w.StartsWith("`C")));
@@ -73,7 +73,7 @@ public class BurnWorkerPollingTests
 
         var outcome = await worker.ExecuteAsync(
             NewRequest(), CancellationToken.None,
-            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000,
+            pollingIntervalMs: 50, pollingTimeoutMs: 4000,
             pollingQuery: PollingQueryKind.U);
 
         Assert.True(outcome.Success);
@@ -96,7 +96,7 @@ public class BurnWorkerPollingTests
 
         var outcome = await worker.ExecuteAsync(
             NewRequest(), CancellationToken.None,
-            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000,
+            pollingIntervalMs: 50, pollingTimeoutMs: 4000,
             pollingQuery: PollingQueryKind.U);
 
         Assert.False(outcome.Success);
@@ -116,7 +116,7 @@ public class BurnWorkerPollingTests
 
         var outcome = await worker.ExecuteAsync(
             NewRequest(), CancellationToken.None,
-            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000,
+            pollingIntervalMs: 50, pollingTimeoutMs: 4000,
             pollingQuery: PollingQueryKind.U);
 
         Assert.True(outcome.Success);
@@ -131,7 +131,7 @@ public class BurnWorkerPollingTests
 
         var outcome = await worker.ExecuteAsync(
             NewRequest(), CancellationToken.None,
-            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000,
+            pollingIntervalMs: 50, pollingTimeoutMs: 4000,
             pollingQuery: PollingQueryKind.U);
 
         Assert.True(outcome.Success);
@@ -147,7 +147,7 @@ public class BurnWorkerPollingTests
 
         var outcome = await worker.ExecuteAsync(
             NewRequest(), CancellationToken.None,
-            BurnWaitMode.Polling, pollingIntervalMs: 200, pollingTimeoutMs: 300,
+            pollingIntervalMs: 200, pollingTimeoutMs: 300,
             pollingQuery: PollingQueryKind.U);
 
         Assert.False(outcome.Success);
@@ -163,7 +163,7 @@ public class BurnWorkerPollingTests
 
         // 不传 pollingQuery：默认 C 查询，outcome.Uid 为 null
         var outcome = await worker.ExecuteAsync(
-            NewRequest(), CancellationToken.None, BurnWaitMode.Polling);
+            NewRequest(), CancellationToken.None);
 
         Assert.True(outcome.Success);
         Assert.Equal(0, (int)PollingQueryKind.C);   // C 为默认枚举值
@@ -180,7 +180,7 @@ public class BurnWorkerPollingTests
 
         var outcome = await worker.ExecuteAsync(
             NewRequest(), CancellationToken.None,
-            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000);
+            pollingIntervalMs: 50, pollingTimeoutMs: 4000);
 
         Assert.True(outcome.Success);
         Assert.Equal(BurnResultKind.Success, outcome.Kind);
@@ -201,7 +201,7 @@ public class BurnWorkerPollingTests
 
         var outcome = await worker.ExecuteAsync(
             NewRequest(), CancellationToken.None,
-            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000);
+            pollingIntervalMs: 50, pollingTimeoutMs: 4000);
 
         Assert.False(outcome.Success);
         Assert.Equal(BurnResultKind.Failure, outcome.Kind);
@@ -216,7 +216,7 @@ public class BurnWorkerPollingTests
 
         var outcome = await worker.ExecuteAsync(
             NewRequest(), CancellationToken.None,
-            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000);
+            pollingIntervalMs: 50, pollingTimeoutMs: 4000);
 
         Assert.True(outcome.Success);
         Assert.Equal(2, port.Writes.Count(w => w.StartsWith("`C")));   // 结果码 3 不算失败，继续轮询
@@ -230,7 +230,7 @@ public class BurnWorkerPollingTests
 
         var outcome = await worker.ExecuteAsync(
             NewRequest(), CancellationToken.None,
-            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000);
+            pollingIntervalMs: 50, pollingTimeoutMs: 4000);
 
         Assert.True(outcome.Success);
         Assert.Equal(2, port.Writes.Count(w => w.StartsWith("`C")));
@@ -246,7 +246,7 @@ public class BurnWorkerPollingTests
 
         var outcome = await worker.ExecuteAsync(
             NewRequest(), CancellationToken.None,
-            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000);
+            pollingIntervalMs: 50, pollingTimeoutMs: 4000);
 
         Assert.True(outcome.Success);
         Assert.Equal(2, port.Writes.Count(w => w.StartsWith("`C")));
@@ -260,7 +260,7 @@ public class BurnWorkerPollingTests
 
         var outcome = await worker.ExecuteAsync(
             NewRequest(), CancellationToken.None,
-            BurnWaitMode.Polling, pollingIntervalMs: 200, pollingTimeoutMs: 300);
+            pollingIntervalMs: 200, pollingTimeoutMs: 300);
 
         Assert.False(outcome.Success);
         Assert.Equal(BurnResultKind.Failure, outcome.Kind);
@@ -280,7 +280,7 @@ public class BurnWorkerPollingTests
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
             worker.ExecuteAsync(NewRequest(), CancellationToken.None,
-                BurnWaitMode.Polling, intervalMs, timeoutMs));
+                intervalMs, timeoutMs));
     }
 
     [Fact]
@@ -293,7 +293,7 @@ public class BurnWorkerPollingTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             worker.ExecuteAsync(NewRequest(), cts.Token,
-                BurnWaitMode.Polling, pollingIntervalMs: 200, pollingTimeoutMs: 4000));
+                pollingIntervalMs: 200, pollingTimeoutMs: 4000));
     }
 
     /// <summary>

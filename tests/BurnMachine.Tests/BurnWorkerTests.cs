@@ -6,7 +6,7 @@ namespace BurnMachine.Tests;
 
 /// <summary>
 /// BurnWorker 集成验证：与协议层、串口通道抽象衔接
-/// （对照 BurnMachineHost docs/测试计划.md §5 手工冒烟的可自动化部分）。
+/// （v0.6.0 起烧录等待唯一方式为轮询，对照 BurnMachineHost docs/测试计划.md §5 手工冒烟的可自动化部分）。
 /// </summary>
 public class BurnWorkerTests
 {
@@ -34,20 +34,21 @@ public class BurnWorkerTests
         Assert.Equal("`F00881289|00000001\r\n", port.Writes[0]);
         Assert.Equal("`P00881289|00000001|0765\r\n", port.Writes[1]);
         Assert.Equal("`C00881289 00000001\r\n".Replace(" ", ""), port.Writes[2]);
-        Assert.Contains(statuses, s => s.Contains("收到响应"));
+        Assert.Contains(statuses, s => s.Contains("烧录成功"));   // 轮询模式终止提示
         Assert.False(port.IsOpen);   // 已关闭
     }
 
     [Fact]
-    public async Task BurnWorker_NoResponse_IsFailure()
+    public async Task BurnWorker_NoResponse_IsTimeoutFailure()
     {
-        var port = new MockSerialChannel();   // 无响应
+        var port = new MockSerialChannel();   // 无响应：轮询循环至超时
         var worker = new BurnWorker(() => port);
 
-        var outcome = await worker.ExecuteAsync(NewRequest(), CancellationToken.None);
+        var outcome = await worker.ExecuteAsync(NewRequest(), CancellationToken.None, pollingTimeoutMs: 300);
 
         Assert.False(outcome.Success);
-        Assert.Equal(BurnResultKind.NoResponse, outcome.Kind);
+        Assert.Equal(BurnResultKind.Failure, outcome.Kind);   // v0.6.0：无响应持续到超时 → 失败（原固定模式为 NoResponse）
+        Assert.Contains("超时", outcome.Detail);
     }
 
     [Fact]
@@ -169,12 +170,12 @@ public class BurnWorkerTests
     }
 
     [Fact]
-    public async Task BurnWorker_Cancellation_DuringBurnWait_Throws()
+    public async Task BurnWorker_Cancellation_DuringPolling_Throws()
     {
         var port = new MockSerialChannel();
         var worker = new BurnWorker(() => port);
         using var cts = new CancellationTokenSource();
-        cts.CancelAfter(100);   // 取消落在烧录等待期间
+        cts.CancelAfter(100);   // 取消落在轮询等待期间
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             worker.ExecuteAsync(new BurnRequest("COM3", "00881289", "0765", 60), cts.Token));

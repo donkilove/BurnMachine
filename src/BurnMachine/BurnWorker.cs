@@ -5,7 +5,8 @@ using BurnMachine.Channel;
 namespace BurnMachine;
 
 /// <summary>
-/// 单点烧录执行器：按 XW16Pro 协议执行 清空→烧录→查询 时序（整轮最多尝试 2 次）。
+/// 单点烧录执行器：按 XW16Pro 协议执行 清空→烧录→轮询查询 时序（整轮最多尝试 2 次）。
+/// 烧录等待唯一方式为轮询（v0.6.0 起，固定等待已退役）。
 /// 响应读取用累积缓冲 + 换行帧切分（修复 BurnMachineHost 原版粘包/半包问题）。
 /// </summary>
 public sealed class BurnWorker
@@ -49,24 +50,19 @@ public sealed class BurnWorker
         _baudRate = baudRate;
     }
 
-    /// <param name="request">单点烧录请求（轮询模式下 BurnTimeSeconds 被忽略，由 pollingTimeoutMs 取代）</param>
+    /// <param name="request">单点烧录请求（BurnTimeSeconds 仅作请求记录，实际等待由 pollingTimeoutMs 决定）</param>
     /// <param name="ct">取消令牌</param>
-    /// <param name="waitMode">烧录等待方式（默认 Fixed：固定等待 BurnTimeSeconds 后查询一次）</param>
-    /// <param name="pollingIntervalMs">轮询模式下两次查询之间的间隔（ms，50~10000，默认 100）</param>
-    /// <param name="pollingTimeoutMs">轮询模式总超时（ms，100~600000，默认 3500）；超时未出结果判失败</param>
+    /// <param name="pollingIntervalMs">两次轮询查询之间的间隔（ms，50~10000，默认 100）</param>
+    /// <param name="pollingTimeoutMs">轮询总超时（ms，100~600000，默认 3500）；超时未出结果判失败</param>
     /// <param name="pollingQuery">轮询查询命令（默认 C；U 时完成轮响应携带 UID 到 outcome.Uid，需固件 &gt; 20240103000000）</param>
     public async Task<BurnOutcome> ExecuteAsync(
         BurnRequest request,
         CancellationToken ct,
-        BurnWaitMode waitMode = BurnWaitMode.Fixed,
         int pollingIntervalMs = DefaultPollingIntervalMs,
         int pollingTimeoutMs = DefaultPollingTimeoutMs,
         PollingQueryKind pollingQuery = PollingQueryKind.C)
     {
-        if (waitMode == BurnWaitMode.Polling)
-        {
-            ValidatePollingParameters(pollingIntervalMs, pollingTimeoutMs);
-        }
+        ValidatePollingParameters(pollingIntervalMs, pollingTimeoutMs);
 
         for (var retry = 0; retry < MaxRetries; retry++)
         {
@@ -83,27 +79,8 @@ public sealed class BurnWorker
 
                 ser.Write(BurnProtocol.BuildBurnCommand(request.BurnId, request.BurnProgram, request.Channels, request.Barcode));
 
-                if (waitMode == BurnWaitMode.Polling)
-                {
-                    // 轮询模式：不再固定等待，改为按间隔轮询 C/U 查询直到结果码 0/1 或超时
-                    return await WaitForBurnCompletionAsync(ser, request, ct, pollingIntervalMs, pollingTimeoutMs, pollingQuery);
-                }
-
-                _status?.Invoke($"等待烧录时间: {request.BurnTimeSeconds}秒");
-                await Task.Delay(TimeSpan.FromSeconds(request.BurnTimeSeconds), ct);
-
-                ser.Write(BurnProtocol.BuildQueryCommand(request.BurnId, request.Channels));
-                ser.ResetInputBuffer();   // 审核修复：清查询前累积的残留帧头，防复用通道/残留字节污染本次解析
-                await Task.Delay(250, ct);   // 时序收紧：实测 C 完整帧最迟 136ms，250ms 留 ~84% 余量（docs/specs/timing-tighten.md）
-
-                var response = await ReadResponseAsync(ser, ct);
-                if (!string.IsNullOrEmpty(response))
-                {
-                    _status?.Invoke($"收到响应: {response}");
-                }
-
-                var kind = BurnProtocol.ParseResponse(response, request.BurnId, out var detail);
-                return new BurnOutcome(kind == BurnResultKind.Success, kind, detail);
+                // 轮询模式（唯一等待方式）：按间隔轮询 C/U 查询直到结果码 0/1 或超时
+                return await WaitForBurnCompletionAsync(ser, request, ct, pollingIntervalMs, pollingTimeoutMs, pollingQuery);
             }
             catch (OperationCanceledException)
             {
@@ -157,54 +134,7 @@ public sealed class BurnWorker
     }
 
     /// <summary>
-    /// UID 扩展查询（v0.2.0 新增）：发送 U 命令并解析 UID 查询回复。
-    /// 需要设备固件版本 &gt; 20240103000000 才支持（旧固件设备无回复 → 结果 Kind=NoResponse）。
-    /// 串口打开失败等环境异常直接上抛（不做重试）。
-    /// </summary>
-    /// <param name="burnSerial">烧录机串口号（如 COM3）</param>
-    /// <param name="burnId">烧录机 ID（8 位十进制数字）</param>
-    /// <param name="channels">查询通道（默认 A）</param>
-    /// <param name="ct">取消令牌</param>
-    public async Task<UidQueryResult> QueryUidAsync(
-        string burnSerial, string burnId, ChannelMask channels = ChannelMask.A, CancellationToken ct = default)
-    {
-        var ser = _channelFactory();
-        try
-        {
-            _status?.Invoke($"打开烧录机串口 {burnSerial} 执行 UID 查询");
-            ser.Open(burnSerial, _baudRate);
-            ser.ResetInputBuffer();
-
-            ser.Write(BurnProtocol.BuildUidQueryCommand(burnId, channels));
-            await Task.Delay(250, ct);   // 时序收紧：实测 U 完整帧最迟 202ms，250ms 留 ~24% 余量（docs/specs/timing-tighten.md）
-
-            var response = await ReadResponseAsync(ser, ct);
-            if (!string.IsNullOrEmpty(response))
-            {
-                _status?.Invoke($"收到响应: {response}");
-            }
-
-            return BurnProtocol.ParseUidResponse(response, burnId);
-        }
-        finally
-        {
-            if (ser is not null)
-            {
-                try
-                {
-                    ser.Dispose();
-                }
-                catch (Exception e)
-                {
-                    // 收尾噪音：不得逃逸破坏返回值
-                    _status?.Invoke($"释放烧录机串口异常: {e.Message}");
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// 轮询等待烧录完成（v0.3.0 新增；v0.5.0 支持 U 查询开关）：发 P 后按固定间隔轮询 C/U 查询，
+    /// 轮询等待烧录完成（v0.3.0 新增；v0.5.0 支持 U 查询开关；v0.6.0 起为唯一等待方式）：发 P 后按固定间隔轮询 C/U 查询，
     /// 结果码 0（成功）/1（失败）判定烧录结束，2/3 与无响应/无效帧视为仍在烧录继续轮询，
     /// 超过 timeoutMs 判失败（严格超时：读窗口与等待间隔均受剩余时间限制，总耗时不超过 timeoutMs）。
     /// U 轮询时（pollingQuery=U）完成轮响应携带 UID 数据到 outcome.Uid。
@@ -284,7 +214,7 @@ public sealed class BurnWorker
         }
     }
 
-    /// <summary>校验轮询参数（仅 Polling 模式生效；范围与 BurnTimeSeconds 规则对齐）</summary>
+    /// <summary>校验轮询参数（范围与 BurnTimeSeconds 规则对齐）</summary>
     private static void ValidatePollingParameters(int pollingIntervalMs, int pollingTimeoutMs)
     {
         if (pollingIntervalMs < MinPollingIntervalMs || pollingIntervalMs > MaxPollingIntervalMs)
