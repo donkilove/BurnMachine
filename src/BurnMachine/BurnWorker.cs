@@ -203,12 +203,13 @@ public sealed class BurnWorker
     /// <summary>
     /// 轮询等待烧录完成（v0.3.0 新增）：发 P 后按固定间隔轮询 C 查询，
     /// 结果码 0（成功）/1（失败）判定烧录结束，2/3 与无响应/无效帧视为仍在烧录继续轮询，
-    /// 超过 timeoutMs 判失败。终止语义由真实硬件实测确认（烧录中查询返回 2，完成后变 0）。
+    /// 超过 timeoutMs 判失败（严格超时：读窗口与等待间隔均受剩余时间限制，总耗时不超过 timeoutMs）。
+    /// 终止语义由真实硬件实测确认（烧录中查询返回 2，完成后变 0）。
     /// </summary>
     private async Task<BurnOutcome> WaitForBurnCompletionAsync(
         ISerialChannel ser, BurnRequest request, CancellationToken ct, int intervalMs, int timeoutMs)
     {
-        var start = DateTime.UtcNow;
+        var sw = Stopwatch.StartNew();
         var query = BurnProtocol.BuildQueryCommand(request.BurnId, request.Channels);
         var round = 0;
 
@@ -216,10 +217,22 @@ public sealed class BurnWorker
         {
             ct.ThrowIfCancellationRequested();
             round++;
+
+            // 严格超时：剩余时间不足则立即判定超时，不发起新一轮查询
+            var remainingMs = timeoutMs - sw.ElapsedMilliseconds;
+            if (remainingMs <= 0)
+            {
+                var msg = $"烧录超时：{timeoutMs}ms 内未查询到完成结果";
+                _status?.Invoke(msg);
+                return new BurnOutcome(false, BurnResultKind.Failure, msg);
+            }
+
             ser.Write(query);
             ser.ResetInputBuffer();   // 清查询前累积的残留帧头，防残留字节污染本次解析
 
-            var response = await ReadResponseAsync(ser, ct, PollingReadWindowMs, PollingReadPollMs);
+            // 单轮读窗口不超过剩余时间（保证总耗时严格 ≤ timeoutMs）
+            var windowMs = (int)Math.Min(PollingReadWindowMs, remainingMs);
+            var response = await ReadResponseAsync(ser, ct, windowMs, PollingReadPollMs);
             if (!string.IsNullOrEmpty(response))
             {
                 _status?.Invoke($"轮询查询（第{round}次）: {response}");
@@ -237,17 +250,17 @@ public sealed class BurnWorker
                     return new BurnOutcome(false, BurnResultKind.Failure, "烧录失败");
             }
 
-            // 结果码 2/3（仍在烧录）或帧无效/无响应：继续轮询
-            var elapsed = DateTime.UtcNow - start;
-            if (elapsed >= TimeSpan.FromMilliseconds(timeoutMs))
+            // 结果码 2/3（仍在烧录）或帧无效/无响应：继续轮询，等待间隔不超过剩余时间
+            var remainingAfterRead = timeoutMs - sw.ElapsedMilliseconds;
+            if (remainingAfterRead <= 0)
             {
                 var msg = $"烧录超时：{timeoutMs}ms 内未查询到完成结果";
                 _status?.Invoke(msg);
                 return new BurnOutcome(false, BurnResultKind.Failure, msg);
             }
 
-            _status?.Invoke($"烧录进行中（第{round}次查询，已等待{(int)elapsed.TotalMilliseconds}ms）");
-            await Task.Delay(intervalMs, ct);
+            _status?.Invoke($"烧录进行中（第{round}次查询，已等待{sw.ElapsedMilliseconds}ms）");
+            await Task.Delay(Math.Min(intervalMs, (int)remainingAfterRead), ct);
         }
     }
 
@@ -279,8 +292,8 @@ public sealed class BurnWorker
         ISerialChannel ser, CancellationToken ct, int windowMs = ResponseWindowMs, int pollMs = ReadPollMs)
     {
         var sb = new StringBuilder();
-        var start = DateTime.UtcNow;
-        while (DateTime.UtcNow - start < TimeSpan.FromMilliseconds(windowMs))
+        var sw = Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < windowMs)
         {
             ct.ThrowIfCancellationRequested();
             var chunk = ser.ReadAvailable();
