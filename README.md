@@ -22,7 +22,7 @@
 ## 安装
 
 ```bash
-dotnet add package BurnMachine --version 0.2.0 \
+dotnet add package BurnMachine --version 0.4.0 \
   --source "https://nuget.pkg.github.com/donkilove/index.json"
 ```
 
@@ -113,7 +113,7 @@ src/BurnMachine/            类库（net8.0，NuGet 包 BurnMachine）
     ├── ISerialChannel.cs   通道抽象（可注入自定义实现）
     ├── SerialPortChannel.cs System.IO.Ports 实现
     └── MockSerialChannel.cs 可编程模拟通道
-tests/BurnMachine.Tests/     协议 + 执行器测试（107 个，含 v0.3.0 轮询模式用例）
+tests/BurnMachine.Tests/     协议 + 执行器测试（119 个，含 v0.3.0 轮询模式与 v0.4.0 加固用例）
 ```
 
 ## 许可协议
