@@ -186,6 +186,28 @@ public class BurnProtocolExtensionTests
         Assert.Equal(BurnResultKind.FormatError, r.Kind);
     }
 
+    // ---- 结果码解析（v0.3.0 轮询用） ----
+
+    [Theory]
+    [InlineData("0", BurnStatus.Success)]
+    [InlineData("1", BurnStatus.Failed)]
+    [InlineData("2", BurnStatus.Cleared)]
+    [InlineData("3", BurnStatus.NoRecord)]
+    public void ParseQueryStatus_ValidCode_ReturnsStatus(string code, BurnStatus expected)
+        => Assert.Equal(expected, BurnProtocol.ParseQueryStatus(OkC(code: code), BurnId));
+
+    [Fact]
+    public void ParseQueryStatus_NoResponse_ReturnsNull()
+        => Assert.Null(BurnProtocol.ParseQueryStatus(null, BurnId));
+
+    [Fact]
+    public void ParseQueryStatus_EchoedIdMismatch_ReturnsNull()
+        => Assert.Null(BurnProtocol.ParseQueryStatus("`C00000000|00000001|0765|0A38AEF0|FFFFFFFFFFFFFFFF|0", BurnId));
+
+    [Fact]
+    public void ParseQueryStatus_MalformedCode_ReturnsNull()
+        => Assert.Null(BurnProtocol.ParseQueryStatus(OkC(code: "00"), BurnId));
+
     // ---- U 回复解析 ----
 
     [Fact]

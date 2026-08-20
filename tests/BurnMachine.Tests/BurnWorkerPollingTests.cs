@@ -117,6 +117,22 @@ public class BurnWorkerPollingTests
     }
 
     [Fact]
+    public async Task Polling_MalformedFrame_ContinuesPolling()
+    {
+        // 回显序列号不匹配（畸形帧）→ ParseQueryStatus 返回 null → 视为仍在烧录继续轮询 → 下一轮成功
+        var port = new ScriptedPollingChannel(
+            ["`C99999999|00000001|0002|002A9717|0000000000016BC4|0\r\n", Success]);
+        var worker = new BurnWorker(() => port);
+
+        var outcome = await worker.ExecuteAsync(
+            NewRequest(), CancellationToken.None,
+            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000);
+
+        Assert.True(outcome.Success);
+        Assert.Equal(2, port.Writes.Count(w => w.StartsWith("`C")));
+    }
+
+    [Fact]
     public async Task Polling_Timeout_ReturnsFailureWithTimeoutDetail()
     {
         var port = new ScriptedPollingChannel([BurnInProgress]);   // 永远"烧录中"

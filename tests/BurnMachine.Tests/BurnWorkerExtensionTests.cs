@@ -91,6 +91,21 @@ public class BurnWorkerExtensionTests
         Assert.Null(result.Uid);
     }
 
+    [Theory]
+    [InlineData("ZZ31FF41")]      // 长度声明非 hex
+    [InlineData("0C31FF41")]      // 声明 12 字节但数据不足
+    public async Task QueryUid_MalformedUidZone_UidNullButBaseSuccess(string uidZone)
+    {
+        var port = new MockSerialChannel();
+        port.EnqueueResponse($"`U00881289|00000001|0000|00000000|FFFFFFFFFFFFFFFF|0|{uidZone}\r\n");
+        var worker = new BurnWorker(() => port);
+
+        var result = await worker.QueryUidAsync(BurnSerial, BurnId, ct: CancellationToken.None);
+
+        Assert.Equal(BurnResultKind.Success, result.Base.Kind);   // 结果码 0：基解析成功
+        Assert.Null(result.Uid);                                  // UID 区畸形 → null（不抛异常）
+    }
+
     [Fact]
     public async Task QueryUid_OpenFailure_Throws()
     {
