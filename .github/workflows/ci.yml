@@ -22,6 +22,7 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ matrix.dotnet }}
+          cache: true   # NuGet 包缓存，加速 restore
 
       - name: Restore
         run: dotnet restore BurnMachine.sln
@@ -30,11 +31,11 @@ jobs:
         run: dotnet build BurnMachine.sln --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test BurnMachine.sln --configuration Release --no-build --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test BurnMachine.sln --configuration Release --no-build --collect:"XPlat Code Coverage" --logger "trx;LogFileName=test-results.trx"
 
-      - name: Upload test results
+      - name: Upload test results and coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: '**/TestResults/*.trx'
+          path: '**/TestResults'
