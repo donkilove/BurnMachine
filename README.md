@@ -22,7 +22,7 @@
 ## 安装
 
 ```bash
-dotnet add package BurnMachine --version 0.4.0 \
+dotnet add package BurnMachine --version 0.4.1 \
   --source "https://nuget.pkg.github.com/donkilove/index.json"
 ```
 

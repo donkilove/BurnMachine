@@ -22,9 +22,10 @@ public sealed class BurnWorker
     public const int DefaultPollingTimeoutMs = 3500;
 
     /// <summary>
-    /// 轮询单轮读窗口（实测完整帧最迟 ~134ms 到达：设备处理 ~80ms + 9600 波特传输 ~54ms；留 ~50% 余量）
+    /// 轮询单轮读窗口（实测完整帧最迟 C 136ms / U 202ms（COM9/00911008，9600 波特）；
+    /// 250ms 对 U 帧留 ~24% 余量，详见 docs/specs/timing-tighten.md）
     /// </summary>
-    private const int PollingReadWindowMs = 200;
+    private const int PollingReadWindowMs = 250;
 
     /// <summary>轮询单轮读取粒度（实测 100ms 粒度会白等一拍至 200ms 才能读到完整帧；20ms 拍 ~140ms 即读到）</summary>
     private const int PollingReadPollMs = 20;
@@ -91,7 +92,7 @@ public sealed class BurnWorker
 
                 ser.Write(BurnProtocol.BuildQueryCommand(request.BurnId, request.Channels));
                 ser.ResetInputBuffer();   // 审核修复：清查询前累积的残留帧头，防复用通道/残留字节污染本次解析
-                await Task.Delay(500, ct);
+                await Task.Delay(250, ct);   // 时序收紧：实测 C 完整帧最迟 136ms，250ms 留 ~84% 余量（docs/specs/timing-tighten.md）
 
                 var response = await ReadResponseAsync(ser, ct);
                 if (!string.IsNullOrEmpty(response))
@@ -173,7 +174,7 @@ public sealed class BurnWorker
             ser.ResetInputBuffer();
 
             ser.Write(BurnProtocol.BuildUidQueryCommand(burnId, channels));
-            await Task.Delay(500, ct);
+            await Task.Delay(250, ct);   // 时序收紧：实测 U 完整帧最迟 202ms，250ms 留 ~24% 余量（docs/specs/timing-tighten.md）
 
             var response = await ReadResponseAsync(ser, ct);
             if (!string.IsNullOrEmpty(response))
