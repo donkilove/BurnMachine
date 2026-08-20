@@ -15,6 +15,25 @@ public sealed class BurnWorker
     private const int ResponseWindowMs = 1000;
     private const int ReadPollMs = 100;
 
+    /// <summary>轮询模式默认查询间隔（ms）</summary>
+    public const int DefaultPollingIntervalMs = 100;
+
+    /// <summary>轮询模式默认总超时（ms）</summary>
+    public const int DefaultPollingTimeoutMs = 3500;
+
+    /// <summary>
+    /// 轮询单轮读窗口（实测完整帧最迟 ~134ms 到达：设备处理 ~80ms + 9600 波特传输 ~54ms；留 ~50% 余量）
+    /// </summary>
+    private const int PollingReadWindowMs = 200;
+
+    /// <summary>轮询单轮读取粒度（实测 100ms 粒度会白等一拍至 200ms 才能读到完整帧；20ms 拍 ~140ms 即读到）</summary>
+    private const int PollingReadPollMs = 20;
+
+    private const int MinPollingIntervalMs = 50;
+    private const int MaxPollingIntervalMs = 10000;
+    private const int MinPollingTimeoutMs = 100;
+    private const int MaxPollingTimeoutMs = 600000;   // 与 BurnTimeSeconds 上限 600s 对齐
+
     private readonly Func<ISerialChannel> _channelFactory;
     private readonly Action<string>? _status;
     private readonly int _baudRate;
@@ -29,8 +48,23 @@ public sealed class BurnWorker
         _baudRate = baudRate;
     }
 
-    public async Task<BurnOutcome> ExecuteAsync(BurnRequest request, CancellationToken ct)
+    /// <param name="request">单点烧录请求（轮询模式下 BurnTimeSeconds 被忽略，由 pollingTimeoutMs 取代）</param>
+    /// <param name="ct">取消令牌</param>
+    /// <param name="waitMode">烧录等待方式（默认 Fixed：固定等待 BurnTimeSeconds 后查询一次）</param>
+    /// <param name="pollingIntervalMs">轮询模式下两次 C 查询之间的间隔（ms，50~10000，默认 100）</param>
+    /// <param name="pollingTimeoutMs">轮询模式总超时（ms，100~600000，默认 3500）；超时未出结果判失败</param>
+    public async Task<BurnOutcome> ExecuteAsync(
+        BurnRequest request,
+        CancellationToken ct,
+        BurnWaitMode waitMode = BurnWaitMode.Fixed,
+        int pollingIntervalMs = DefaultPollingIntervalMs,
+        int pollingTimeoutMs = DefaultPollingTimeoutMs)
     {
+        if (waitMode == BurnWaitMode.Polling)
+        {
+            ValidatePollingParameters(pollingIntervalMs, pollingTimeoutMs);
+        }
+
         for (var retry = 0; retry < MaxRetries; retry++)
         {
             ISerialChannel? ser = null;
@@ -45,6 +79,12 @@ public sealed class BurnWorker
                 await Task.Delay(100, ct);
 
                 ser.Write(BurnProtocol.BuildBurnCommand(request.BurnId, request.BurnProgram, request.Channels, request.Barcode));
+
+                if (waitMode == BurnWaitMode.Polling)
+                {
+                    // 轮询模式：不再固定等待，改为按间隔轮询 C 查询直到结果码 0/1 或超时
+                    return await WaitForBurnCompletionAsync(ser, request, ct, pollingIntervalMs, pollingTimeoutMs);
+                }
 
                 _status?.Invoke($"等待烧录时间: {request.BurnTimeSeconds}秒");
                 await Task.Delay(TimeSpan.FromSeconds(request.BurnTimeSeconds), ct);
@@ -161,15 +201,86 @@ public sealed class BurnWorker
     }
 
     /// <summary>
-    /// 读响应：累积缓冲，总超时 1s，收到换行（帧边界）提前结束。
+    /// 轮询等待烧录完成（v0.3.0 新增）：发 P 后按固定间隔轮询 C 查询，
+    /// 结果码 0（成功）/1（失败）判定烧录结束，2/3 与无响应/无效帧视为仍在烧录继续轮询，
+    /// 超过 timeoutMs 判失败。终止语义由真实硬件实测确认（烧录中查询返回 2，完成后变 0）。
+    /// </summary>
+    private async Task<BurnOutcome> WaitForBurnCompletionAsync(
+        ISerialChannel ser, BurnRequest request, CancellationToken ct, int intervalMs, int timeoutMs)
+    {
+        var start = DateTime.UtcNow;
+        var query = BurnProtocol.BuildQueryCommand(request.BurnId, request.Channels);
+        var round = 0;
+
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            round++;
+            ser.Write(query);
+            ser.ResetInputBuffer();   // 清查询前累积的残留帧头，防残留字节污染本次解析
+
+            var response = await ReadResponseAsync(ser, ct, PollingReadWindowMs, PollingReadPollMs);
+            if (!string.IsNullOrEmpty(response))
+            {
+                _status?.Invoke($"轮询查询（第{round}次）: {response}");
+            }
+
+            var status = BurnProtocol.ParseQueryStatus(response, request.BurnId);
+            switch (status)
+            {
+                case BurnStatus.Success:
+                    _status?.Invoke("烧录成功");
+                    return new BurnOutcome(true, BurnResultKind.Success, "烧录成功");
+
+                case BurnStatus.Failed:
+                    _status?.Invoke("烧录失败");
+                    return new BurnOutcome(false, BurnResultKind.Failure, "烧录失败");
+            }
+
+            // 结果码 2/3（仍在烧录）或帧无效/无响应：继续轮询
+            var elapsed = DateTime.UtcNow - start;
+            if (elapsed >= TimeSpan.FromMilliseconds(timeoutMs))
+            {
+                var msg = $"烧录超时：{timeoutMs}ms 内未查询到完成结果";
+                _status?.Invoke(msg);
+                return new BurnOutcome(false, BurnResultKind.Failure, msg);
+            }
+
+            _status?.Invoke($"烧录进行中（第{round}次查询，已等待{(int)elapsed.TotalMilliseconds}ms）");
+            await Task.Delay(intervalMs, ct);
+        }
+    }
+
+    /// <summary>校验轮询参数（仅 Polling 模式生效；范围与 BurnTimeSeconds 规则对齐）</summary>
+    private static void ValidatePollingParameters(int pollingIntervalMs, int pollingTimeoutMs)
+    {
+        if (pollingIntervalMs < MinPollingIntervalMs || pollingIntervalMs > MaxPollingIntervalMs)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(pollingIntervalMs),
+                $"轮询间隔必须在{MinPollingIntervalMs}-{MaxPollingIntervalMs}ms之间");
+        }
+
+        if (pollingTimeoutMs < MinPollingTimeoutMs || pollingTimeoutMs > MaxPollingTimeoutMs)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(pollingTimeoutMs),
+                $"轮询超时必须在{MinPollingTimeoutMs}-{MaxPollingTimeoutMs}ms之间");
+        }
+    }
+
+    /// <summary>
+    /// 读响应：累积缓冲，总超时 windowMs（默认 1s），收到换行（帧边界）提前结束；
+    /// 读取粒度 pollMs（默认 100ms；轮询模式传 20ms 以免白等一拍）。
     /// 审核修复：按协议规格 §2.3 切帧——粘包（缓冲含多帧）时只取第一帧（到第一个 \n 为止），
     /// 余量丢弃（查询为 request-response 模式，下次查询前会 ResetInputBuffer），避免整块解析误判。
     /// </summary>
-    private static async Task<string> ReadResponseAsync(ISerialChannel ser, CancellationToken ct)
+    private static async Task<string> ReadResponseAsync(
+        ISerialChannel ser, CancellationToken ct, int windowMs = ResponseWindowMs, int pollMs = ReadPollMs)
     {
         var sb = new StringBuilder();
         var start = DateTime.UtcNow;
-        while (DateTime.UtcNow - start < TimeSpan.FromMilliseconds(ResponseWindowMs))
+        while (DateTime.UtcNow - start < TimeSpan.FromMilliseconds(windowMs))
         {
             ct.ThrowIfCancellationRequested();
             var chunk = ser.ReadAvailable();
@@ -185,7 +296,7 @@ public sealed class BurnWorker
                 sb.Append(chunk);
             }
 
-            await Task.Delay(ReadPollMs, ct);
+            await Task.Delay(pollMs, ct);
         }
 
         return sb.ToString().Trim();

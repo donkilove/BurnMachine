@@ -211,6 +211,24 @@ public static class BurnProtocol
     }
 
     /// <summary>
+    /// 解析 C 查询响应的结果码（0=成功 / 1=失败 / 2=已清空 / 3=无记录）。
+    /// 供轮询等待模式（BurnWaitMode.Polling）判定烧录进度：0/1 = 烧录结束，2/3 = 仍在烧录。
+    /// 帧无效（无响应 / 格式错误 / 回显序列号不匹配 / 结果码畸形）→ null。
+    /// </summary>
+    public static BurnStatus? ParseQueryStatus(string? response, string burnId)
+    {
+        var kind = ParseCore(response, burnId, 'C', out _);
+        if (kind is not (BurnResultKind.Success or BurnResultKind.Failure))
+        {
+            return null;
+        }
+
+        var parts = response!.Trim().Split('|');
+        var last = parts.Length >= 6 ? parts[5] : parts[^1];
+        return TryParseStatus(last);
+    }
+
+    /// <summary>
     /// 解析烧录机响应（输入已按帧切分；此处先 trim 再判定）。
     /// </summary>
     /// <param name="response">完整响应帧（可为 null/空）</param>
