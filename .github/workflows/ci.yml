@@ -22,7 +22,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ matrix.dotnet }}
-          cache: true   # NuGet 包缓存，加速 restore
 
       - name: Restore
         run: dotnet restore BurnMachine.sln
