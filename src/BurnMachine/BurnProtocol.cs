@@ -68,13 +68,13 @@ public static class BurnProtocol
     /// <param name="burnId">烧录机 ID（8 位十进制数字）</param>
     /// <param name="burnProgram">烧录程序位号（4 位十进制数字）</param>
     /// <param name="channels">烧录通道掩码</param>
-    /// <param name="barcode">条码字节（每字节转 2 位大写 hex；大小端由镜像配置决定，库不处理）；null/空省略字段</param>
-    public static string BuildBurnCommand(string burnId, string burnProgram, ChannelMask channels, byte[]? barcode = null)
+    /// <param name="barcode">条码字节（每字节转 2 位大写 hex；大小端由镜像配置决定，库不处理）；null/空省略字段（v0.4.0 类型改为 IReadOnlyList&lt;byte&gt;）</param>
+    public static string BuildBurnCommand(string burnId, string burnProgram, ChannelMask channels, IReadOnlyList<byte>? barcode = null)
     {
         ValidateBurnId(burnId);
         ValidateBurnProgram(burnProgram);
         var cmd = $"`P{burnId}|{FormatChannelMask(channels)}|{burnProgram}";
-        if (barcode is { Length: > 0 })
+        if (barcode is { Count: > 0 })
         {
             cmd += $"|{ConvertBarcodeToHex(barcode)}";
         }
@@ -126,9 +126,9 @@ public static class BurnProtocol
     private static string FormatChannelMask(ChannelMask channels) => ((uint)channels).ToString("X8");
 
     /// <summary>条码字节 → 大写 hex 字符串（每字节 2 字符）</summary>
-    private static string ConvertBarcodeToHex(byte[] barcode)
+    private static string ConvertBarcodeToHex(IReadOnlyList<byte> barcode)
     {
-        var sb = new System.Text.StringBuilder(barcode.Length * 2);
+        var sb = new System.Text.StringBuilder(barcode.Count * 2);
         foreach (var b in barcode)
         {
             sb.Append(b.ToString("X2"));
