@@ -184,12 +184,13 @@ public static class BurnProtocol
 
     /// <summary>
     /// UID 区解析：前 2 位为 UID 长度（十六进制字节数），随后为该长度的 UID 数据，其余无意义。
-    /// 数据不足/非法 hex → null（不抛异常）。
+    /// 长度 0 / 数据不足 / 非法 hex → null（不抛异常）。
     /// </summary>
     private static byte[]? TryParseUidZone(string zone)
     {
         if (zone.Length < 2
-            || !int.TryParse(zone[..2], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var length))
+            || !int.TryParse(zone[..2], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var length)
+            || length == 0)   // v0.5.0：长度 0 = 无 UID 数据（实测设备烧录中部分轮前缀为 00），返回 null 而非空数组
         {
             return null;
         }

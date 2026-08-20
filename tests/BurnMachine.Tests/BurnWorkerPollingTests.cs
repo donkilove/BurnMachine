@@ -51,6 +51,126 @@ public class BurnWorkerPollingTests
         Assert.Equal(2, port.Writes.Count(w => w.StartsWith("`C")));
     }
 
+    // ==================== v0.5.0：轮询模式 U 命令支持（PollingQueryKind 开关） ====================
+    // 实测依据（COM9/00911008/镜像 0000）：烧录中 U 查询返回结果码 2 照常应答不干扰烧录，
+    // 完成后返回 0 且 UID 区携带 16 字节真实数据；部分轮 UID 长度前缀为 00（解析为 null）。
+
+    private const string UidInProgress =   // 结果码 2，UID 长度 0x00 → Uid=null
+        "`U00881289|00000001|0002|002A9717|0000000000016BC4|2|00343435500B0039364F0048001F0000000000000000000000\r\n";
+    private const string UidSuccess =      // 结果码 0，UID 长度 0x10 → 16 字节 UID
+        "`U00881289|00000001|0002|002A9717|0000000000016BC4|0|10343435500B0039364F0048001F0000000000000000000000\r\n";
+    private const string UidFailed =       // 结果码 1，UID 长度 0x10
+        "`U00881289|00000001|0002|002A9717|0000000000016BC4|1|10343435500B0039364F0048001F0000000000000000000000\r\n";
+
+    private static readonly byte[] ExpectedUid =
+        [0x34, 0x34, 0x35, 0x50, 0x0B, 0x00, 0x39, 0x36, 0x4F, 0x00, 0x48, 0x00, 0x1F, 0x00, 0x00, 0x00];
+
+    [Fact]
+    public async Task Polling_UidQuery_PollsWithUAndReturnsUid()
+    {
+        var port = new ScriptedPollingChannel([UidInProgress, UidInProgress, UidSuccess]);
+        var worker = new BurnWorker(() => port);
+
+        var outcome = await worker.ExecuteAsync(
+            NewRequest(), CancellationToken.None,
+            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000,
+            pollingQuery: PollingQueryKind.U);
+
+        Assert.True(outcome.Success);
+        Assert.Equal(BurnResultKind.Success, outcome.Kind);
+        // 指令顺序：清空 → 烧录 → 3 次 U 轮询（烧录中 2 次 + 完成 1 次），不再出现 C 查询
+        Assert.Equal("`F00881289|00000001\r\n", port.Writes[0]);
+        Assert.Equal("`P00881289|00000001|0765\r\n", port.Writes[1]);
+        Assert.Equal(3, port.Writes.Count(w => w.StartsWith("`U")));
+        Assert.DoesNotContain(port.Writes, w => w.StartsWith("`C"));
+        // 完成轮响应中的 UID 随结果带出
+        Assert.NotNull(outcome.Uid);
+        Assert.Equal(ExpectedUid, outcome.Uid);
+    }
+
+    [Fact]
+    public async Task Polling_UidQuery_FailedRoundCarriesUid()
+    {
+        var port = new ScriptedPollingChannel([UidInProgress, UidFailed]);
+        var worker = new BurnWorker(() => port);
+
+        var outcome = await worker.ExecuteAsync(
+            NewRequest(), CancellationToken.None,
+            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000,
+            pollingQuery: PollingQueryKind.U);
+
+        Assert.False(outcome.Success);
+        Assert.Equal(BurnResultKind.Failure, outcome.Kind);
+        Assert.Equal(2, port.Writes.Count(w => w.StartsWith("`U")));   // 结果码 1 立即停止
+        Assert.Equal(ExpectedUid, outcome.Uid);   // 失败轮同样携带 UID
+    }
+
+    [Fact]
+    public async Task Polling_UidQuery_ZeroLengthUidZone_ReturnsNullUid()
+    {
+        // 完成轮 UID 长度前缀 00（设备怪癖实测出现）→ Uid=null，不抛异常
+        var zeroLenSuccess =
+            "`U00881289|00000001|0002|002A9717|0000000000016BC4|0|00343435500B0039364F0048001F0000000000000000000000\r\n";
+        var port = new ScriptedPollingChannel([zeroLenSuccess]);
+        var worker = new BurnWorker(() => port);
+
+        var outcome = await worker.ExecuteAsync(
+            NewRequest(), CancellationToken.None,
+            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000,
+            pollingQuery: PollingQueryKind.U);
+
+        Assert.True(outcome.Success);
+        Assert.Null(outcome.Uid);
+    }
+
+    [Fact]
+    public async Task Polling_UidQuery_NoResponseRound_ContinuesPolling()
+    {
+        var port = new ScriptedPollingChannel(["", UidSuccess]);   // 首轮无应答 → 继续 U 轮询
+        var worker = new BurnWorker(() => port);
+
+        var outcome = await worker.ExecuteAsync(
+            NewRequest(), CancellationToken.None,
+            BurnWaitMode.Polling, pollingIntervalMs: 50, pollingTimeoutMs: 4000,
+            pollingQuery: PollingQueryKind.U);
+
+        Assert.True(outcome.Success);
+        Assert.Equal(2, port.Writes.Count(w => w.StartsWith("`U")));
+        Assert.Equal(ExpectedUid, outcome.Uid);
+    }
+
+    [Fact]
+    public async Task Polling_UidQuery_Timeout_ReturnsFailure()
+    {
+        var port = new ScriptedPollingChannel([UidInProgress]);   // 永远"烧录中"
+        var worker = new BurnWorker(() => port);
+
+        var outcome = await worker.ExecuteAsync(
+            NewRequest(), CancellationToken.None,
+            BurnWaitMode.Polling, pollingIntervalMs: 200, pollingTimeoutMs: 300,
+            pollingQuery: PollingQueryKind.U);
+
+        Assert.False(outcome.Success);
+        Assert.Equal(BurnResultKind.Failure, outcome.Kind);
+        Assert.Contains("超时", outcome.Detail);
+    }
+
+    [Fact]
+    public async Task Polling_DefaultQueryKind_IsC_AndUidIsNull()
+    {
+        var port = new ScriptedPollingChannel([BurnInProgress, Success]);
+        var worker = new BurnWorker(() => port);
+
+        // 不传 pollingQuery：默认 C 查询，outcome.Uid 为 null
+        var outcome = await worker.ExecuteAsync(
+            NewRequest(), CancellationToken.None, BurnWaitMode.Polling);
+
+        Assert.True(outcome.Success);
+        Assert.Equal(0, (int)PollingQueryKind.C);   // C 为默认枚举值
+        Assert.Null(outcome.Uid);
+        Assert.DoesNotContain(port.Writes, w => w.StartsWith("`U"));
+    }
+
     [Fact]
     public async Task Polling_BurnInProgressThenSuccess_PollsUntilCodeZero()
     {
@@ -197,7 +317,7 @@ public class BurnWorkerPollingTests
         public void Write(string text)
         {
             _writes.Add(text);
-            if (text.StartsWith("`C"))
+            if (text.Length > 1 && text[0] == '`' && text[1] is 'C' or 'U')   // C/U 查询都驱动逐次应答
             {
                 _cWrites++;
             }

@@ -52,14 +52,16 @@ public sealed class BurnWorker
     /// <param name="request">单点烧录请求（轮询模式下 BurnTimeSeconds 被忽略，由 pollingTimeoutMs 取代）</param>
     /// <param name="ct">取消令牌</param>
     /// <param name="waitMode">烧录等待方式（默认 Fixed：固定等待 BurnTimeSeconds 后查询一次）</param>
-    /// <param name="pollingIntervalMs">轮询模式下两次 C 查询之间的间隔（ms，50~10000，默认 100）</param>
+    /// <param name="pollingIntervalMs">轮询模式下两次查询之间的间隔（ms，50~10000，默认 100）</param>
     /// <param name="pollingTimeoutMs">轮询模式总超时（ms，100~600000，默认 3500）；超时未出结果判失败</param>
+    /// <param name="pollingQuery">轮询查询命令（默认 C；U 时完成轮响应携带 UID 到 outcome.Uid，需固件 &gt; 20240103000000）</param>
     public async Task<BurnOutcome> ExecuteAsync(
         BurnRequest request,
         CancellationToken ct,
         BurnWaitMode waitMode = BurnWaitMode.Fixed,
         int pollingIntervalMs = DefaultPollingIntervalMs,
-        int pollingTimeoutMs = DefaultPollingTimeoutMs)
+        int pollingTimeoutMs = DefaultPollingTimeoutMs,
+        PollingQueryKind pollingQuery = PollingQueryKind.C)
     {
         if (waitMode == BurnWaitMode.Polling)
         {
@@ -83,8 +85,8 @@ public sealed class BurnWorker
 
                 if (waitMode == BurnWaitMode.Polling)
                 {
-                    // 轮询模式：不再固定等待，改为按间隔轮询 C 查询直到结果码 0/1 或超时
-                    return await WaitForBurnCompletionAsync(ser, request, ct, pollingIntervalMs, pollingTimeoutMs);
+                    // 轮询模式：不再固定等待，改为按间隔轮询 C/U 查询直到结果码 0/1 或超时
+                    return await WaitForBurnCompletionAsync(ser, request, ct, pollingIntervalMs, pollingTimeoutMs, pollingQuery);
                 }
 
                 _status?.Invoke($"等待烧录时间: {request.BurnTimeSeconds}秒");
@@ -202,16 +204,20 @@ public sealed class BurnWorker
     }
 
     /// <summary>
-    /// 轮询等待烧录完成（v0.3.0 新增）：发 P 后按固定间隔轮询 C 查询，
+    /// 轮询等待烧录完成（v0.3.0 新增；v0.5.0 支持 U 查询开关）：发 P 后按固定间隔轮询 C/U 查询，
     /// 结果码 0（成功）/1（失败）判定烧录结束，2/3 与无响应/无效帧视为仍在烧录继续轮询，
     /// 超过 timeoutMs 判失败（严格超时：读窗口与等待间隔均受剩余时间限制，总耗时不超过 timeoutMs）。
-    /// 终止语义由真实硬件实测确认（烧录中查询返回 2，完成后变 0）。
+    /// U 轮询时（pollingQuery=U）完成轮响应携带 UID 数据到 outcome.Uid。
+    /// 终止语义由真实硬件实测确认（烧录中查询返回 2，完成后变 0；U 与 C 行为一致）。
     /// </summary>
     private async Task<BurnOutcome> WaitForBurnCompletionAsync(
-        ISerialChannel ser, BurnRequest request, CancellationToken ct, int intervalMs, int timeoutMs)
+        ISerialChannel ser, BurnRequest request, CancellationToken ct, int intervalMs, int timeoutMs,
+        PollingQueryKind pollingQuery)
     {
         var sw = Stopwatch.StartNew();
-        var query = BurnProtocol.BuildQueryCommand(request.BurnId, request.Channels);
+        var query = pollingQuery == PollingQueryKind.U
+            ? BurnProtocol.BuildUidQueryCommand(request.BurnId, request.Channels)
+            : BurnProtocol.BuildQueryCommand(request.BurnId, request.Channels);
         var round = 0;
 
         while (true)
@@ -239,16 +245,29 @@ public sealed class BurnWorker
                 _status?.Invoke($"轮询查询（第{round}次）: {response}");
             }
 
-            var status = BurnProtocol.ParseQueryStatus(response, request.BurnId);
+            BurnStatus? status;
+            IReadOnlyList<byte>? uid = null;
+            if (pollingQuery == PollingQueryKind.U)
+            {
+                // U 轮询：结果码与 UID 同帧解析（复用 ParseUidResponse 的回显校验与容错语义）
+                var r = BurnProtocol.ParseUidResponse(response, request.BurnId);
+                status = r.Base.Status;
+                uid = r.Uid;
+            }
+            else
+            {
+                status = BurnProtocol.ParseQueryStatus(response, request.BurnId);
+            }
+
             switch (status)
             {
                 case BurnStatus.Success:
                     _status?.Invoke("烧录成功");
-                    return new BurnOutcome(true, BurnResultKind.Success, "烧录成功");
+                    return new BurnOutcome(true, BurnResultKind.Success, "烧录成功") { Uid = uid };
 
                 case BurnStatus.Failed:
                     _status?.Invoke("烧录失败");
-                    return new BurnOutcome(false, BurnResultKind.Failure, "烧录失败");
+                    return new BurnOutcome(false, BurnResultKind.Failure, "烧录失败") { Uid = uid };
             }
 
             // 结果码 2/3（仍在烧录）或帧无效/无响应：继续轮询，等待间隔不超过剩余时间

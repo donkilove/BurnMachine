@@ -16,13 +16,14 @@
 - **条码写入** —— 烧录时可选携带条码字节（ASCII hex），大小端由镜像配置决定
 - **单点烧录执行器 `BurnWorker`** —— 清空→烧录→查询完整时序，整轮最多尝试 2 次（失败自动重试 1 次，间隔 1 秒），协作式取消；`QueryUidAsync` 独立 UID 查询
 - **轮询等待模式（v0.3.0）** —— 不再固定等待烧录时间：`BurnWaitMode.Polling` 按固定间隔轮询 `C` 查询，结果码 0/1 判定完成、2/3 与无响应继续、超时判失败（默认间隔 100ms / 超时 3.5s，可配；行为经真实硬件验证）
+- **轮询 U 查询开关（v0.5.0）** —— `pollingQuery: PollingQueryKind.U` 让轮询循环改发 `U` 查询：结果码判定不变，烧录完成的那轮响应直接携带芯片 UID 到 `outcome.Uid`，无需完成后再补查一次（需固件 > 20240103000000；旧固件 U 无响应将超时判失败）
 - **粘包/半包防护** —— 累积缓冲 + 换行帧切分，粘包只取第一帧，半包累积到帧边界
 - **可注入串口通道** —— `ISerialChannel` 抽象 + `SerialPortChannel`（System.IO.Ports）真实实现 + `MockSerialChannel` 可编程模拟（离线开发/测试）
 
 ## 安装
 
 ```bash
-dotnet add package BurnMachine --version 0.4.1 \
+dotnet add package BurnMachine --version 0.5.0 \
   --source "https://nuget.pkg.github.com/donkilove/index.json"
 ```
 
@@ -55,6 +56,20 @@ var outcome = await worker.ExecuteAsync(
     waitMode: BurnWaitMode.Polling,
     pollingIntervalMs: 100,      // 查询间隔，默认 100ms（50~10000）
     pollingTimeoutMs: 3500);     // 总超时，默认 3.5s（100~600000）；超时判失败
+```
+
+轮询模式改用 U 查询，烧录完成直接带回芯片 UID（需固件 > 20240103000000）：
+
+```csharp
+var outcome = await worker.ExecuteAsync(
+    new BurnRequest("COM3", "00881289", "0765", burnTimeSeconds: 3),
+    CancellationToken.None,
+    waitMode: BurnWaitMode.Polling,
+    pollingQuery: PollingQueryKind.U);   // 轮询发 U 命令；完成轮 outcome.Uid 携带 UID（无数据为 null）
+if (outcome.Uid is { Count: > 0 })
+{
+    Console.WriteLine($"UID: {Convert.ToHexString(outcome.Uid.ToArray())}");
+}
 ```
 
 查询烧录结果详情（镜像号/校验和/剩余次数）：
@@ -105,15 +120,15 @@ src/BurnMachine/            类库（net8.0，NuGet 包 BurnMachine）
 ├── BurnProtocol.cs         指令构造与响应解析（BurnResultKind / BurnResult / UidQueryResult）
 ├── BurnRequest.cs          单点烧录请求（通道/条码可选）
 ├── BurnOutcome.cs          单点烧录结果
-├── BurnWorker.cs           清空→烧录→查询执行时序 + UID 查询（支持固定等待/轮询两种模式）
-├── BurnWaitMode.cs         烧录等待方式枚举（Fixed 默认 / Polling 轮询，v0.3.0）
+├── BurnWorker.cs           清空→烧录→查询执行时序 + UID 查询（支持固定等待/轮询两种模式，轮询可切 U 查询）
+├── BurnWaitMode.cs         烧录等待方式枚举（Fixed 默认 / Polling 轮询，v0.3.0）+ PollingQueryKind 查询命令（v0.5.0）
 ├── ChannelMask.cs          通道掩码与结果码枚举（v0.2.0）
 ├── BurnResult.cs           结构化烧录结果与 UID 查询结果（v0.2.0）
 └── Channel/                串口通道
     ├── ISerialChannel.cs   通道抽象（可注入自定义实现）
     ├── SerialPortChannel.cs System.IO.Ports 实现
     └── MockSerialChannel.cs 可编程模拟通道
-tests/BurnMachine.Tests/     协议 + 执行器测试（119 个，含 v0.3.0 轮询模式与 v0.4.0 加固用例）
+tests/BurnMachine.Tests/     协议 + 执行器测试（125 个，含 v0.3.0 轮询模式、v0.4.0 加固与 v0.5.0 U 轮询用例）
 ```
 
 ## 许可协议
