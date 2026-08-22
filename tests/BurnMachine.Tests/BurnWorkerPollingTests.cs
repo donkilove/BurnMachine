@@ -30,10 +30,10 @@ public class BurnWorkerPollingTests
         => new(BurnSerial, BurnId, BurnProgram, BurnTime);
 
     [Fact]
-    public void Polling_DefaultParameters_Are100msIntervalAnd3500msTimeout()
+    public void Polling_DefaultParameters_Are50msIntervalAnd3500msTimeout()
     {
-        // 默认值经真实硬件验证：100ms 间隔设备稳定应答，3500ms 覆盖实测烧录时长（~2.3s）留有余量
-        Assert.Equal(100, BurnWorker.DefaultPollingIntervalMs);
+        // 默认值经真实硬件验证：50ms 间隔 14 轮查询零丢帧（v0.6.2），3500ms 覆盖实测烧录时长（~2.3s）留有余量
+        Assert.Equal(50, BurnWorker.DefaultPollingIntervalMs);
         Assert.Equal(3500, BurnWorker.DefaultPollingTimeoutMs);
     }
 

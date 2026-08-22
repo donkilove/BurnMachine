@@ -13,11 +13,13 @@ public sealed class BurnWorker
 {
     private const int MaxRetries = 2;
     private const int RetryDelayMs = 1000;
-    private const int ResponseWindowMs = 1000;
-    private const int ReadPollMs = 100;
 
-    /// <summary>轮询模式默认查询间隔（ms）</summary>
-    public const int DefaultPollingIntervalMs = 100;
+    /// <summary>
+    /// 轮询模式默认查询间隔（v0.6.2：100ms → 50ms。真机实测 2026-08-22（COM9/00911007，9600 波特）：
+    /// 50ms 间隔下 14 轮查询零丢帧（响应 102~157ms），完成检测正常；每轮周期 ~166ms，
+    /// 相对 100ms（~215ms）检测粒度更细，烧录时长不变（设备烧录耗时主导）。
+    /// </summary>
+    public const int DefaultPollingIntervalMs = 50;
 
     /// <summary>轮询模式默认总超时（ms）</summary>
     public const int DefaultPollingTimeoutMs = 3500;
@@ -59,7 +61,7 @@ public sealed class BurnWorker
 
     /// <param name="request">单点烧录请求（BurnTimeSeconds 仅作请求记录，实际等待由 pollingTimeoutMs 决定）</param>
     /// <param name="ct">取消令牌</param>
-    /// <param name="pollingIntervalMs">两次轮询查询之间的间隔（ms，50~10000，默认 100）</param>
+    /// <param name="pollingIntervalMs">两次轮询查询之间的间隔（ms，50~10000，默认 50）</param>
     /// <param name="pollingTimeoutMs">轮询总超时（ms，100~600000，默认 3500）；超时未出结果判失败</param>
     /// <param name="pollingQuery">轮询查询命令（默认 C；U 时完成轮响应携带 UID 到 outcome.Uid，需固件 &gt; 20240103000000）</param>
     public async Task<BurnOutcome> ExecuteAsync(
@@ -244,13 +246,13 @@ public sealed class BurnWorker
     }
 
     /// <summary>
-    /// 读响应：累积缓冲，总超时 windowMs（默认 1s），收到换行（帧边界）提前结束；
-    /// 读取粒度 pollMs（默认 100ms；轮询模式传 20ms 以免白等一拍）。
+    /// 读响应：累积缓冲，总超时 windowMs，收到换行（帧边界）提前结束；
+    /// 读取粒度 pollMs（轮询模式传 20ms 以免白等一拍）。
     /// 审核修复：按协议规格 §2.3 切帧——粘包（缓冲含多帧）时只取第一帧（到第一个 \n 为止），
     /// 余量丢弃（查询为 request-response 模式，下次查询前会 ResetInputBuffer），避免整块解析误判。
     /// </summary>
     private static async Task<string> ReadResponseAsync(
-        ISerialChannel ser, CancellationToken ct, int windowMs = ResponseWindowMs, int pollMs = ReadPollMs)
+        ISerialChannel ser, CancellationToken ct, int windowMs, int pollMs)
     {
         var sb = new StringBuilder();
         var sw = Stopwatch.StartNew();
