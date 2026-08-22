@@ -15,11 +15,10 @@ public sealed class BurnWorker
     private const int RetryDelayMs = 1000;
 
     /// <summary>
-    /// 轮询模式默认查询间隔（v0.6.2：100ms → 50ms。真机实测 2026-08-22（COM9/00911007，9600 波特）：
-    /// 50ms 间隔下 14 轮查询零丢帧（响应 102~157ms），完成检测正常；每轮周期 ~166ms，
-    /// 相对 100ms（~215ms）检测粒度更细，烧录时长不变（设备烧录耗时主导）。
+    /// 轮询模式默认查询间隔（v0.6.3：50ms → 30ms。真机实测 2026-08-22（COM9/00911007，9600 波特）：
+    /// 30ms 间隔 16~17 轮查询零丢帧、完成检测正常；下限同步 50 → 30）。
     /// </summary>
-    public const int DefaultPollingIntervalMs = 50;
+    public const int DefaultPollingIntervalMs = 30;
 
     /// <summary>轮询模式默认总超时（ms）</summary>
     public const int DefaultPollingTimeoutMs = 3500;
@@ -34,13 +33,12 @@ public sealed class BurnWorker
     private const int PollingReadPollMs = 20;
 
     /// <summary>
-    /// 清空→烧录指令间隔（v0.6.1：100ms → 30ms。真机实测 2026-08-22（COM9/00911007，9600 波特）：
-    /// 发送清空后间隔 0ms 紧跟查询即已生效（结果码立即变 2=被清空过），且查询响应时间与基线无差异
-    /// （~104ms）；100ms 属保守值，30ms 仍留 10 倍以上余量）。
+    /// 清空→烧录指令间隔（v0.6.1：100ms → 30ms；v0.6.3：30ms → 10ms。真机实测 2026-08-22
+    /// （COM9/00911007，9600 波特）：清空间隔 0ms 极限压测 3 组零丢帧且烧录成功，10ms 留 5 倍余量）。
     /// </summary>
-    private const int ClearToBurnDelayMs = 30;
+    private const int ClearToBurnDelayMs = 10;
 
-    private const int MinPollingIntervalMs = 50;
+    private const int MinPollingIntervalMs = 30;
     private const int MaxPollingIntervalMs = 10000;
     private const int MinPollingTimeoutMs = 100;
     private const int MaxPollingTimeoutMs = 600000;   // 与 BurnTimeSeconds 上限 600s 对齐
@@ -61,7 +59,7 @@ public sealed class BurnWorker
 
     /// <param name="request">单点烧录请求（BurnTimeSeconds 仅作请求记录，实际等待由 pollingTimeoutMs 决定）</param>
     /// <param name="ct">取消令牌</param>
-    /// <param name="pollingIntervalMs">两次轮询查询之间的间隔（ms，50~10000，默认 50）</param>
+    /// <param name="pollingIntervalMs">两次轮询查询之间的间隔（ms，30~10000，默认 30）</param>
     /// <param name="pollingTimeoutMs">轮询总超时（ms，100~600000，默认 3500）；超时未出结果判失败</param>
     /// <param name="pollingQuery">轮询查询命令（默认 C；U 时完成轮响应携带 UID 到 outcome.Uid，需固件 &gt; 20240103000000）</param>
     public async Task<BurnOutcome> ExecuteAsync(

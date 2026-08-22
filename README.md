@@ -53,7 +53,7 @@ Console.WriteLine(outcome.Success ? "烧录成功" : $"烧录失败: {outcome.De
 var outcome = await worker.ExecuteAsync(
     new BurnRequest("COM3", "00881289", "0765", burnTimeSeconds: 3),   // burnTimeSeconds 仅作记录
     CancellationToken.None,
-    pollingIntervalMs: 50,       // 查询间隔，默认 50ms（50~10000；真机验证零丢帧）
+    pollingIntervalMs: 30,       // 查询间隔，默认 30ms（30~10000；真机验证零丢帧）
     pollingTimeoutMs: 3500);     // 总超时，默认 3.5s（100~600000）；超时判失败
 ```
 

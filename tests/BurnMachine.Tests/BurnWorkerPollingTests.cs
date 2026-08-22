@@ -30,10 +30,10 @@ public class BurnWorkerPollingTests
         => new(BurnSerial, BurnId, BurnProgram, BurnTime);
 
     [Fact]
-    public void Polling_DefaultParameters_Are50msIntervalAnd3500msTimeout()
+    public void Polling_DefaultParameters_Are30msIntervalAnd3500msTimeout()
     {
-        // 默认值经真实硬件验证：50ms 间隔 14 轮查询零丢帧（v0.6.2），3500ms 覆盖实测烧录时长（~2.3s）留有余量
-        Assert.Equal(50, BurnWorker.DefaultPollingIntervalMs);
+        // 默认值经真实硬件验证：30ms 间隔 16~17 轮查询零丢帧（v0.6.3），3500ms 覆盖实测烧录时长（~2.3s）留有余量
+        Assert.Equal(30, BurnWorker.DefaultPollingIntervalMs);
         Assert.Equal(3500, BurnWorker.DefaultPollingTimeoutMs);
     }
 
@@ -43,7 +43,7 @@ public class BurnWorkerPollingTests
         var port = new ScriptedPollingChannel([BurnInProgress, Success]);
         var worker = new BurnWorker(() => port);
 
-        // 不传间隔/超时：使用默认值 100ms / 3500ms
+        // 不传间隔/超时：使用默认值 30ms / 3500ms
         var outcome = await worker.ExecuteAsync(
             NewRequest(), CancellationToken.None);
 
@@ -269,7 +269,7 @@ public class BurnWorkerPollingTests
     }
 
     [Theory]
-    [InlineData(10, 4000)]      // 间隔低于下限 50ms
+    [InlineData(10, 4000)]      // 间隔低于下限 30ms
     [InlineData(20000, 4000)]   // 间隔高于上限 10000ms
     [InlineData(200, 50)]       // 超时低于下限 100ms
     [InlineData(200, 700000)]   // 超时高于上限 600000ms
