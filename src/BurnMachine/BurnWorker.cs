@@ -31,6 +31,13 @@ public sealed class BurnWorker
     /// <summary>轮询单轮读取粒度（实测 100ms 粒度会白等一拍至 200ms 才能读到完整帧；20ms 拍 ~140ms 即读到）</summary>
     private const int PollingReadPollMs = 20;
 
+    /// <summary>
+    /// 清空→烧录指令间隔（v0.6.1：100ms → 30ms。真机实测 2026-08-22（COM9/00911007，9600 波特）：
+    /// 发送清空后间隔 0ms 紧跟查询即已生效（结果码立即变 2=被清空过），且查询响应时间与基线无差异
+    /// （~104ms）；100ms 属保守值，30ms 仍留 10 倍以上余量）。
+    /// </summary>
+    private const int ClearToBurnDelayMs = 30;
+
     private const int MinPollingIntervalMs = 50;
     private const int MaxPollingIntervalMs = 10000;
     private const int MinPollingTimeoutMs = 100;
@@ -74,10 +81,14 @@ public sealed class BurnWorker
                 ser.Open(request.BurnSerial, _baudRate);
                 ser.ResetInputBuffer();   // 审核修复：清打开时驱动缓冲残留（设备上电噪声/上次会话数据）
 
-                ser.Write(BurnProtocol.BuildClearCommand(request.BurnId, request.Channels));
-                await Task.Delay(100, ct);
+                var clearCmd = BurnProtocol.BuildClearCommand(request.BurnId, request.Channels);
+                _status?.Invoke($"发送清空指令: {clearCmd.Trim()}");
+                ser.Write(clearCmd);
+                await Task.Delay(ClearToBurnDelayMs, ct);
 
-                ser.Write(BurnProtocol.BuildBurnCommand(request.BurnId, request.BurnProgram, request.Channels, request.Barcode));
+                var burnCmd = BurnProtocol.BuildBurnCommand(request.BurnId, request.BurnProgram, request.Channels, request.Barcode);
+                _status?.Invoke($"发送烧录指令: {burnCmd.Trim()}");
+                ser.Write(burnCmd);
 
                 // 轮询模式（唯一等待方式）：按间隔轮询 C/U 查询直到结果码 0/1 或超时
                 return await WaitForBurnCompletionAsync(ser, request, ct, pollingIntervalMs, pollingTimeoutMs, pollingQuery);

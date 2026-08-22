@@ -35,6 +35,9 @@ public class BurnWorkerTests
         Assert.Equal("`P00881289|00000001|0765\r\n", port.Writes[1]);
         Assert.Equal("`C00881289 00000001\r\n".Replace(" ", ""), port.Writes[2]);
         Assert.Contains(statuses, s => s.Contains("烧录成功"));   // 轮询模式终止提示
+        // v0.6.1：指令级日志——清空/烧录指令发送时经状态回调输出（供宿主执行日志可见）
+        Assert.Contains(statuses, s => s.Contains("发送清空指令") && s.Contains("`F00881289|00000001"));
+        Assert.Contains(statuses, s => s.Contains("发送烧录指令") && s.Contains("`P00881289|00000001|0765"));
         Assert.False(port.IsOpen);   // 已关闭
     }
 
