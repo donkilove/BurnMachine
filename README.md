@@ -1,9 +1,9 @@
 # BurnMachine
 
-[![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/8.0)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-基于 .NET 8 的 XW16Pro 烧录机串口通信库：指令构造、响应解析与单点烧录执行时序（9600 8N1）。
+基于 .NET 10 的 XW16Pro 烧录机串口通信库：指令构造、响应解析与单点烧录执行时序（9600 8N1）。
 
 本库从 [BurnMachineHost](https://github.com/donkilove/BurnMachineHost) 机台烧录上位机中提取并发布为可复用组件，让多个上位机应用可以共享一套经过充分验证的烧录机通信栈，而无需重复维护源代码。
 
@@ -25,7 +25,7 @@
 ## 安装
 
 ```bash
-dotnet add package BurnMachine --version 0.6.3 \
+dotnet add package BurnMachine --version 0.7.0 \
   --source "https://nuget.pkg.github.com/donkilove/index.json"
 ```
 
@@ -100,6 +100,7 @@ var worker = new BurnWorker(() => mock);
 
 ## 版本历史
 
+- **v0.7.0**（2026-08-24）—— 升级 .NET 8 → .NET 10（TFM/CI setup-dotnet 10.0.x/依赖）；净版 net10 行为一致（119 测试全绿）
 - **v0.6.3**（2026-08-22）—— 清空→烧录间隔 30ms → **10ms**；轮询间隔 50ms → **30ms**（下限同步）；真机极限压测依据（清空 0ms 三组零丢帧且烧录成功）
 - **v0.6.2**（2026-08-22）—— 轮询间隔 100ms → **50ms**；清理未使用的读窗口常量
 - **v0.6.1**（2026-08-22）—— 新增指令级日志（清空/烧录指令经状态回调输出）；清空→烧录间隔 100ms → **30ms**
@@ -116,7 +117,7 @@ dotnet test BurnMachine.sln
 
 ```
 BurnMachine.sln
-src/BurnMachine/            类库（net8.0，NuGet 包 BurnMachine）
+src/BurnMachine/            类库（net10.0，NuGet 包 BurnMachine）
 ├── BurnProtocol.cs         指令构造与响应解析（BurnResultKind / BurnResult / UidQueryResult）
 ├── BurnRequest.cs          单点烧录请求（通道/条码可选）
 ├── BurnOutcome.cs          单点烧录结果
