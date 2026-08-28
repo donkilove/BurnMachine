@@ -4,7 +4,9 @@ namespace BurnMachine;
 /// 结构化烧录结果（v0.2.0 新增）：在既有判定（Kind/Detail）之上补充 C 回复详情字段。
 /// 字段语义见 docs/XW16Pro扩展串口控制协议.md §6。
 /// </summary>
-/// <param name="Kind">判定类型（沿用既有语义：非 0 结果码一律 Failure）</param>
+/// <param name="Kind">判定类型（沿用既有语义：非 0 结果码一律 Failure；审计 BM-08 澄清——
+/// 结果码 2/3 在轮询语义中表示"继续等待"而非最终失败，一次性解析中 Kind=Failure 仅为
+/// "非 0 即失败"的兼容判定，真实结果码见 <see cref="Status"/>）</param>
 /// <param name="Detail">状态文本（沿用既有中文提示）</param>
 /// <param name="ImageNo">上次烧录镜像号；9999 或未烧录过 → null</param>
 /// <param name="MainChecksum">上次烧录镜像主校验和；FFFFFFFF → null</param>
