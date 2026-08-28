@@ -26,6 +26,10 @@ public sealed class MockSerialChannel : ISerialChannel
     /// <summary>ResetInputBuffer 被调用的次数（审核修复：验证残留缓冲清除时机）</summary>
     public int ResetInputBufferCalls { get; private set; }
 
+    /// <summary>查询指令（`C/`U）写入时的回调（审计 BM-05：模拟设备对查询的"即时回包"——
+    /// 响应在 Write 返回前已进入驱动缓冲，验证 Reset 时机不会清掉本次响应）</summary>
+    public Action<string>? OnQueryWrite { get; set; }
+
     public bool IsOpen { get; private set; }
 
     /// <summary>入队一条设备响应（查询指令写入后、下一次读取时才进入可读缓冲，模拟真实设备行为）</summary>
@@ -56,6 +60,7 @@ public sealed class MockSerialChannel : ISerialChannel
         if (text.StartsWith("`C") || text.StartsWith("`U"))   // 查询指令（含 UID 扩展查询）：设备将响应
         {
             _queryReceived = true;
+            OnQueryWrite?.Invoke(text);   // 审计 BM-05：模拟设备即时回包（响应先于后续 Reset 到达）
         }
     }
 

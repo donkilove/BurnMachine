@@ -197,5 +197,23 @@ public class BurnWorkerTests
         public void Close() { CloseCalls++; IsOpen = false; throw new InvalidOperationException("关闭失败: 句柄无效"); }
         public void Dispose() { }
     }
+
+    // ---- 审计 BM-05：先 Reset 后 Write（设备即时回包不被误清） ----
+
+    [Fact]
+    public async Task BurnWorker_ImmediateResponse_NotClearedByReset()
+    {
+        // 设备对查询"即时回包"（响应在 Write 返回前已进入驱动缓冲）——
+        // 旧顺序（Write→Reset）会把响应清掉 → 轮询空转至超时；新顺序（Reset→Write）保留
+        var port = new MockSerialChannel();
+        port.OnQueryWrite = _ => port.InjectDriverBytes("`C00881289|00000001|0002|002A9717|0000000000016BC4|0\r\n");
+        var worker = new BurnWorker(() => port);
+
+        var outcome = await worker.ExecuteAsync(NewRequest(), CancellationToken.None, pollingTimeoutMs: 500);
+
+        Assert.True(outcome.Success);
+        Assert.Equal(BurnResultKind.Success, outcome.Kind);
+        Assert.Equal(1, port.Writes.Count(w => w.StartsWith("`C")));   // 首轮即成功，不空转
+    }
 }
 

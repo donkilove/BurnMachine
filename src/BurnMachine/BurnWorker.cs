@@ -175,8 +175,8 @@ public sealed class BurnWorker
                 return new BurnOutcome(false, BurnResultKind.Timeout, msg);   // 审计 BM-02：超时独立 Kind
             }
 
+            ser.ResetInputBuffer();   // 审计 BM-05：先清残留再发查询——设备"即时回包"（响应在 Write 返回前已到达）不被误清
             ser.Write(query);
-            ser.ResetInputBuffer();   // 清查询前累积的残留帧头，防残留字节污染本次解析
 
             // 单轮读窗口不超过剩余时间（保证总耗时严格 ≤ timeoutMs）
             var windowMs = (int)Math.Min(PollingReadWindowMs, remainingMs);
