@@ -17,7 +17,7 @@
 
 - 烧录中 U 查询不干扰烧录 ✓（与 burn-polling.md 中 C 的实测结论一致）
 - 完成后 U 响应携带真实 UID ✓
-- **设备怪癖**：烧录中部分轮 UID 区长度前缀为 `00`（TryParseUidZone 解析为 `Uid=null`）；完成轮实测前缀 `10`。完成轮理论上也可能赶上 `00` 前缀 → 该轮 `Uid=null`（不重查，调用方可再调 `QueryUidAsync`）。
+- **设备怪癖**：烧录中部分轮 UID 区长度前缀为 `00`（TryParseUidZone 解析为 `Uid=null`）；完成轮实测前缀 `10`。完成轮理论上也可能赶上 `00` 前缀 → 该轮 `Uid=null`（不重查、不抛异常；`QueryUidAsync` 已于 v0.6.0 移除，无重查路径，调用方需接受 `Uid=null` 或人工干预）。
 - U 响应帧更长（~96 字符，完整帧最迟 202ms < 250ms 读窗口，余量已由 timing-tighten 规格预留）。
 
 ## 范围与非目标
@@ -28,7 +28,7 @@
   - `WaitForBurnCompletionAsync` 按 `pollingQuery` 发 C 或 U：U 轮用 `BurnProtocol.ParseUidResponse` 取 `Base.Status` 判定进度、终止轮带出 `Uid`。
   - `BurnOutcome` 新增 `IReadOnlyList<byte>? Uid { get; init; }`（构造器不变，向后兼容）。
 - 测试与文档：`BurnWorkerPollingTests` 扩展 U 轮询用例；README 轮询章节补充说明。
-- **非目标**：不改 `ParseQueryStatus`（C 路径原样）、不动固定模式、不动 `QueryUidAsync`、不动轮询 C 的默认行为、不改 `BurnProtocol` 解析语义。
+- **非目标**：不改 `ParseQueryStatus`（C 路径原样）、不动轮询 C 的默认行为、不改 `BurnProtocol` 解析语义。（注：`BurnWaitMode`/固定模式/`QueryUidAsync` 已随 v0.6.0 退役，历史快照见本文档下方接口图。）
 
 ## 验收标准
 

@@ -129,7 +129,7 @@ src/BurnMachine/            类库（net10.0，NuGet 包 BurnMachine）
     ├── ISerialChannel.cs   通道抽象（可注入自定义实现）
     ├── SerialPortChannel.cs System.IO.Ports 实现
     └── MockSerialChannel.cs 可编程模拟通道
-tests/BurnMachine.Tests/     协议 + 执行器测试（119 个，含轮询模式、加固与 U 轮询用例（v0.6.0 删固定模式与 QueryUidAsync））
+tests/BurnMachine.Tests/     协议 + 执行器测试（129 个，含轮询模式、加固与 U 轮询用例（v0.6.0 删固定模式与 QueryUidAsync））
 ```
 
 ## 许可协议

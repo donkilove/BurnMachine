@@ -160,7 +160,7 @@ public class BurnWorkerPollingTests
     }
 
     [Fact]
-    public async Task Polling_UidQuery_Timeout_ReturnsFailure()
+    public async Task Polling_UidQuery_Timeout_ReturnsTimeout()
     {
         var port = new ScriptedPollingChannel([UidInProgress]);   // 永远"烧录中"
         var worker = new BurnWorker(() => port);
@@ -273,7 +273,7 @@ public class BurnWorkerPollingTests
     }
 
     [Fact]
-    public async Task Polling_Timeout_ReturnsFailureWithTimeoutDetail()
+    public async Task Polling_Timeout_ReturnsTimeoutWithDetail()
     {
         var port = new ScriptedPollingChannel([BurnInProgress]);   // 永远"烧录中"
         var worker = new BurnWorker(() => port);
@@ -293,17 +293,14 @@ public class BurnWorkerPollingTests
     [Fact]
     public async Task Execute_ConcurrentSameSerial_Serialized()
     {
-        // 两个执行共享同一串口通道（模拟同口并发调用），键控互斥使执行整体串行——
-        // 任一执行的完整三连（清空/烧录/查询）不与其他执行的指令交错
-        var port = new ScriptedPollingChannel(
-        [
-            "`C00881289|00000001|0002|002A9717|0000000000016BC4|0\r\n",
-            "`C00881290|00000001|0002|002A9717|0000000000016BC4|0\r\n",
-        ]);
+        // 两个执行共享同一串口通道、同一请求（同 burn_id，响应配对与 gate 竞争顺序无关）——
+        // 键控互斥使执行整体串行：每组三连（清空/烧录/查询）完整不交错
+        var ok = "`C00881289|00000001|0002|002A9717|0000000000016BC4|0\r\n";
+        var port = new ScriptedPollingChannel([ok, ok]);
         var worker = new BurnWorker(() => port);
 
         var reqA = new BurnRequest("COM3", "00881289", "0765", 0.1);
-        var reqB = new BurnRequest("COM3", "00881290", "0765", 0.1);
+        var reqB = new BurnRequest("COM3", "00881289", "0765", 0.1);   // 同请求：响应配对与执行顺序无关
 
         var results = await Task.WhenAll(
             worker.ExecuteAsync(reqA, CancellationToken.None, pollingTimeoutMs: 1000),
@@ -312,9 +309,14 @@ public class BurnWorkerPollingTests
         Assert.All(results, r => Assert.True(r.Success));
         var writes = port.Writes;
         Assert.Equal(6, writes.Count);
-        var firstThreeSameId = writes.Take(3).All(w => w.Contains("00881289"))
-            || writes.Take(3).All(w => w.Contains("00881290"));
-        Assert.True(firstThreeSameId, $"并发执行未串行化（指令交错）：{string.Join(" | ", writes)}");
+        // 串行化断言（与执行顺序无关）：每组三连（F/P/C）完整不交错——
+        // 交错时 writes[1]/writes[4] 会混入另一执行的首条（F）
+        Assert.StartsWith("`F", writes[0]);
+        Assert.StartsWith("`P", writes[1]);
+        Assert.StartsWith("`C", writes[2]);
+        Assert.StartsWith("`F", writes[3]);
+        Assert.StartsWith("`P", writes[4]);
+        Assert.StartsWith("`C", writes[5]);
     }
 
     [Theory]

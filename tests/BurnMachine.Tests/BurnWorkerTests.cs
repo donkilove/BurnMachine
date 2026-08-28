@@ -221,10 +221,12 @@ public class BurnWorkerTests
     [Fact]
     public async Task Execute_DifferentSerial_NotBlocked()
     {
-        // 键控粒度：不同烧录串口并行执行互不阻塞
-        var portA = new MockSerialChannel();
+        // 键控粒度：不同烧录串口应真实并行执行（共享并发探针检测重叠，
+        // 防"退化为全局单 gate"的回归——若串行则探针 MaxActive 恒为 1）
+        var probe = new SharedConcurrencyProbe();
+        var portA = new ProbingChannel(probe);
         portA.EnqueueResponse("`C00881289|00000001|0002|002A9717|0000000000016BC4|0\r\n");
-        var portB = new MockSerialChannel();
+        var portB = new ProbingChannel(probe);
         portB.EnqueueResponse("`C00881290|00000001|0002|002A9717|0000000000016BC4|0\r\n");
         var workerA = new BurnWorker(() => portA);
         var workerB = new BurnWorker(() => portB);
@@ -237,6 +239,74 @@ public class BurnWorkerTests
             workerB.ExecuteAsync(reqB, CancellationToken.None, pollingTimeoutMs: 1000));
 
         Assert.All(results, r => Assert.True(r.Success));
+        Assert.True(probe.MaxActive >= 2,
+            $"不同串口应并行执行（并发探针 MaxActive={probe.MaxActive}）——疑似退化为全局 gate");
+    }
+
+    /// <summary>跨通道共享的并发活跃探针（审计 BM-03 测试增强）：
+    /// barrier 同步——第二个执行进入时放行两者，随后保持 20ms 活跃，两执行必然重叠；
+    /// 退化（全局单 gate）时先进入者等 2s 超时后继续，测试随后以 MaxActive&lt;2 失败。</summary>
+    private sealed class SharedConcurrencyProbe
+    {
+        private readonly ManualResetEventSlim _bothEntered = new(false);
+        private int _active;
+        private int _entered;
+        private int _maxActive;
+
+        public int MaxActive => Volatile.Read(ref _maxActive);
+
+        public void Enter()
+        {
+            var current = Interlocked.Increment(ref _active);
+            UpdateMax(current);
+            if (Interlocked.Increment(ref _entered) == 2)
+            {
+                _bothEntered.Set();
+            }
+
+            _bothEntered.Wait(TimeSpan.FromSeconds(2));   // 退化场景防死锁（超时后继续）
+            Thread.Sleep(20);                              // 保持活跃窗口（重叠必然发生）
+            Interlocked.Decrement(ref _active);
+        }
+
+        private void UpdateMax(int current)
+        {
+            while (true)
+            {
+                var observed = Volatile.Read(ref _maxActive);
+                if (current <= observed
+                    || Interlocked.CompareExchange(ref _maxActive, current, observed) == observed)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    /// <summary>包装通道：写入时进入共享探针（barrier 检测并行）</summary>
+    private sealed class ProbingChannel : ISerialChannel
+    {
+        private readonly MockSerialChannel _inner = new();
+        private readonly SharedConcurrencyProbe _probe;
+
+        public ProbingChannel(SharedConcurrencyProbe probe) => _probe = probe;
+
+        public bool IsOpen => _inner.IsOpen;
+
+        public void EnqueueResponse(string response) => _inner.EnqueueResponse(response);
+
+        public void Open(string portName, int baudRate) => _inner.Open(portName, baudRate);
+
+        public void Write(string text)
+        {
+            _probe.Enter();
+            _inner.Write(text);
+        }
+
+        public string ReadAvailable() => _inner.ReadAvailable();
+        public void ResetInputBuffer() => _inner.ResetInputBuffer();
+        public void Close() => _inner.Close();
+        public void Dispose() => _inner.Dispose();
     }
 
     // ---- 审计 BM-03：宿主状态回调异常隔离（不触发重试重发） ----

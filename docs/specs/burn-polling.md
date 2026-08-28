@@ -4,6 +4,8 @@
 > 轮询为唯一等待方式（默认间隔 30ms、超时 3500ms，见 `BurnWorker` 常量与
 > `docs/specs/timing-tighten.md`）；本文档保留作历史参考，其中 Fixed 模式、
 > `BurnWaitMode` 枚举、interval 默认 100ms 等表述均已过时。
+> 另有下列数值/顺序亦已过时：读窗口 **200ms**（现 250ms）、间隔范围 **50~10000**（现 30~10000）、
+> 轮询写序 **"写 C → ResetInputBuffer"**（现为先清后写，审计 BM-05）。
 
 ## 目标
 
