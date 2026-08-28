@@ -68,6 +68,43 @@ public class BurnProtocolExtensionTests
         => Assert.Equal("`P00881289|00000001|0765\r\n",
             BurnProtocol.BuildBurnCommand(BurnId, "0765", ChannelMask.A, null));
 
+    // ---- 审计 BM-04：通道掩码校验（零值/0xFFFFFFFF 笔误拒绝） ----
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0xFFFFFFFFu)]
+    public void BuildCommands_InvalidChannelMask_Throws(uint mask)
+    {
+        var channels = (ChannelMask)mask;
+
+        Assert.Throws<ArgumentException>(() => BurnProtocol.BuildClearCommand(BurnId, channels));
+        Assert.Throws<ArgumentException>(() => BurnProtocol.BuildBurnCommand(BurnId, "0765", channels));
+        Assert.Throws<ArgumentException>(() => BurnProtocol.BuildQueryCommand(BurnId, channels));
+        Assert.Throws<ArgumentException>(() => BurnProtocol.BuildUidQueryCommand(BurnId, channels));
+    }
+
+    // ---- 审计 BM-07：条码长度上限 ----
+
+    [Fact]
+    public void BuildBurnCommand_OversizeBarcode_Throws()
+    {
+        var barcode = new byte[BurnProtocol.MaxBarcodeBytes + 1];
+
+        Assert.Throws<ArgumentException>(
+            () => BurnProtocol.BuildBurnCommand(BurnId, "0765", ChannelMask.A, barcode));
+    }
+
+    [Fact]
+    public void BuildBurnCommand_MaxLengthBarcode_Ok()
+    {
+        var barcode = new byte[BurnProtocol.MaxBarcodeBytes];
+
+        var cmd = BurnProtocol.BuildBurnCommand(BurnId, "0765", ChannelMask.A, barcode);
+
+        Assert.StartsWith("`P00881289|00000001|0765|", cmd);
+        Assert.EndsWith("\r\n", cmd);
+    }
+
     [Fact]
     public void BuildBurnCommand_EmptyBarcode_OmitsField()
         => Assert.Equal("`P00881289|00000001|0765\r\n",

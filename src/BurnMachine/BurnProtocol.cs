@@ -26,6 +26,9 @@ public static class BurnProtocol
     /// <summary>响应帧长度上限（字符数，审核修复：拒畸形/恶意超长帧，实测查询响应约 60 字符）</summary>
     public const int MaxResponseLength = 256;
 
+    /// <summary>条码字节长度上限（审计 BM-07：防御性上限——协议文档未限定条码长度，产线条码远小于此，防畸形/恶意超长帧）</summary>
+    public const int MaxBarcodeBytes = 64;
+
     /// <summary>清空指令：`F{burnId}|00000001\r\n</summary>
     public static string BuildClearCommand(string burnId)
     {
@@ -73,6 +76,12 @@ public static class BurnProtocol
     {
         ValidateBurnId(burnId);
         ValidateBurnProgram(burnProgram);
+        // 审计 BM-07：条码长度上限（防御性，防畸形/恶意超长帧）
+        if (barcode is { Count: > MaxBarcodeBytes })
+        {
+            throw new ArgumentException($"条码长度超过上限 {MaxBarcodeBytes} 字节（实际 {barcode.Count}）", nameof(barcode));
+        }
+
         var cmd = $"`P{burnId}|{FormatChannelMask(channels)}|{burnProgram}";
         if (barcode is { Count: > 0 })
         {
@@ -124,8 +133,20 @@ public static class BurnProtocol
 
     // ---- v0.2.0 内部实现 ----
 
-    /// <summary>通道掩码 → 8 位大写十六进制（A=00000001、B=00000002、Both=00000003）</summary>
-    private static string FormatChannelMask(ChannelMask channels) => ((uint)channels).ToString("X8");
+    /// <summary>
+    /// 通道掩码 → 8 位大写十六进制（A=00000001、B=00000002、Both=00000003）。
+    /// 审计 BM-04：零值/0xFFFFFFFF 属笔误（分别清空无通道/全部通道），构造指令时拒绝。
+    /// </summary>
+    private static string FormatChannelMask(ChannelMask channels)
+    {
+        var value = (uint)channels;
+        if (value == 0 || value == 0xFFFFFFFF)
+        {
+            throw new ArgumentException("通道掩码不能为 0 或 0xFFFFFFFF（笔误可清空全部通道）", nameof(channels));
+        }
+
+        return value.ToString("X8");
+    }
 
     /// <summary>条码字节 → 大写 hex 字符串（每字节 2 字符）</summary>
     private static string ConvertBarcodeToHex(IReadOnlyList<byte> barcode)
