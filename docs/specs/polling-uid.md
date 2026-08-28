@@ -63,9 +63,10 @@ BurnOutcome：record BurnOutcome(bool Success, BurnResultKind Kind, string Detai
 
 | 情况 | 行为 |
 |---|---|
-| U 无响应 / 帧无效 | 继续轮询（与 C 轮一致）；总超时判失败 |
-| 旧固件（≤20240103000000）不支持 U | 全程无响应 → 超时失败；文档注明 `pollingQuery=U` 需新固件 |
+| U 无响应 / 帧无效 | 继续轮询（与 C 轮一致）；总超时判失败（Kind=Timeout，审计 BM-02） |
+| 旧固件（≤20240103000000）不支持 U | 全程无响应 → 超时失败（Kind=Timeout）；文档注明 `pollingQuery=U` 需新固件 |
 | 完成轮 UID 长度前缀 00 / UID 区畸形 | `outcome.Uid = null`，不抛异常、不重查 |
+| 完成轮缺 UID 区（6 段有效帧） | **保留烧录判定（成功/失败原样），仅 `Uid=null`**（审计 BM-01：不再降级 FormatError 误判超时 NG） |
 | 结果码 2/3 | 继续轮询（Status 判定，与 C 一致） |
 | 取消 / 串口异常 | 与 C 轮询一致（取消抛异常、异常走整轮重试） |
 

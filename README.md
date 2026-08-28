@@ -96,7 +96,7 @@ var worker = new BurnWorker(() => mock);
 | 查询 | `` `C{burnId}{掩码8hex}\r\n `` | 查询结果（注意无 `\|` 分隔） |
 | UID 查询 | `` `U{burnId}{掩码8hex}\r\n `` | UID 扩展查询（固件 > 20240103000000） |
 
-完整协议规格见 [XW16Pro 扩展串口控制协议](../../Burn/docs/XW16Pro扩展串口控制协议.md)。
+完整协议规格见 [XW16Pro 扩展串口控制协议](docs/XW16Pro扩展串口控制协议.md)。
 
 ## 版本历史
 

@@ -1,6 +1,9 @@
 # 烧录轮询等待模式（BurnWaitMode.Polling）
 
-> 状态：已实现并硬件验证（2026-08-17，COM3 / 00911008 / 镜像 0000）
+> 状态：**已退役的历史规格（审计 BM 系列标注）**——v0.6.0 起 `BurnWaitMode` 已移除，
+> 轮询为唯一等待方式（默认间隔 30ms、超时 3500ms，见 `BurnWorker` 常量与
+> `docs/specs/timing-tighten.md`）；本文档保留作历史参考，其中 Fixed 模式、
+> `BurnWaitMode` 枚举、interval 默认 100ms 等表述均已过时。
 
 ## 目标
 
