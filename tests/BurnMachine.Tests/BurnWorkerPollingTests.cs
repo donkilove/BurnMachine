@@ -288,6 +288,35 @@ public class BurnWorkerPollingTests
         Assert.True(port.Writes.Count(w => w.StartsWith("`C")) >= 2);   // 至少轮询 2 次后才超时
     }
 
+    // ---- 审计 BM-03：同一烧录串口并发执行串行化（键控互斥；ScriptedPollingChannel 逐条应答） ----
+
+    [Fact]
+    public async Task Execute_ConcurrentSameSerial_Serialized()
+    {
+        // 两个执行共享同一串口通道（模拟同口并发调用），键控互斥使执行整体串行——
+        // 任一执行的完整三连（清空/烧录/查询）不与其他执行的指令交错
+        var port = new ScriptedPollingChannel(
+        [
+            "`C00881289|00000001|0002|002A9717|0000000000016BC4|0\r\n",
+            "`C00881290|00000001|0002|002A9717|0000000000016BC4|0\r\n",
+        ]);
+        var worker = new BurnWorker(() => port);
+
+        var reqA = new BurnRequest("COM3", "00881289", "0765", 0.1);
+        var reqB = new BurnRequest("COM3", "00881290", "0765", 0.1);
+
+        var results = await Task.WhenAll(
+            worker.ExecuteAsync(reqA, CancellationToken.None, pollingTimeoutMs: 1000),
+            worker.ExecuteAsync(reqB, CancellationToken.None, pollingTimeoutMs: 1000));
+
+        Assert.All(results, r => Assert.True(r.Success));
+        var writes = port.Writes;
+        Assert.Equal(6, writes.Count);
+        var firstThreeSameId = writes.Take(3).All(w => w.Contains("00881289"))
+            || writes.Take(3).All(w => w.Contains("00881290"));
+        Assert.True(firstThreeSameId, $"并发执行未串行化（指令交错）：{string.Join(" | ", writes)}");
+    }
+
     [Theory]
     [InlineData(10, 4000)]      // 间隔低于下限 30ms
     [InlineData(20000, 4000)]   // 间隔高于上限 10000ms

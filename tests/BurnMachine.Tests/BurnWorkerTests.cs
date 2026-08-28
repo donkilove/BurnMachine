@@ -215,5 +215,44 @@ public class BurnWorkerTests
         Assert.Equal(BurnResultKind.Success, outcome.Kind);
         Assert.Equal(1, port.Writes.Count(w => w.StartsWith("`C")));   // 首轮即成功，不空转
     }
+
+    // ---- 审计 BM-03：同一烧录串口并发执行串行化（键控互斥） ----
+
+    [Fact]
+    public async Task Execute_DifferentSerial_NotBlocked()
+    {
+        // 键控粒度：不同烧录串口并行执行互不阻塞
+        var portA = new MockSerialChannel();
+        portA.EnqueueResponse("`C00881289|00000001|0002|002A9717|0000000000016BC4|0\r\n");
+        var portB = new MockSerialChannel();
+        portB.EnqueueResponse("`C00881290|00000001|0002|002A9717|0000000000016BC4|0\r\n");
+        var workerA = new BurnWorker(() => portA);
+        var workerB = new BurnWorker(() => portB);
+
+        var reqA = new BurnRequest("COM3", "00881289", "0765", 0.1);
+        var reqB = new BurnRequest("COM4", "00881290", "0765", 0.1);
+
+        var results = await Task.WhenAll(
+            workerA.ExecuteAsync(reqA, CancellationToken.None, pollingTimeoutMs: 1000),
+            workerB.ExecuteAsync(reqB, CancellationToken.None, pollingTimeoutMs: 1000));
+
+        Assert.All(results, r => Assert.True(r.Success));
+    }
+
+    // ---- 审计 BM-03：宿主状态回调异常隔离（不触发重试重发） ----
+
+    [Fact]
+    public async Task Execute_StatusCallbackThrows_StillSucceeds()
+    {
+        // 回调（UI/日志）抛异常不得被当作烧录错误触发重试重发（对同一芯片二次烧录）
+        var port = new MockSerialChannel();
+        port.EnqueueResponse("`C00881289|00000001|0002|002A9717|0000000000016BC4|0\r\n");
+        var worker = new BurnWorker(() => port, _ => throw new InvalidOperationException("UI boom"));
+
+        var outcome = await worker.ExecuteAsync(NewRequest(), CancellationToken.None);
+
+        Assert.True(outcome.Success);
+        Assert.Equal(1, port.Writes.Count(w => w.StartsWith("`F")));   // 仅一轮清空指令，无重试重发
+    }
 }
 

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using BurnMachine.Channel;
@@ -8,11 +9,16 @@ namespace BurnMachine;
 /// 单点烧录执行器：按 XW16Pro 协议执行 清空→烧录→轮询查询 时序（整轮最多尝试 2 次）。
 /// 烧录等待唯一方式为轮询（v0.6.0 起，固定等待已退役）。
 /// 响应读取用累积缓冲 + 换行帧切分（修复 BurnMachineHost 原版粘包/半包问题）。
+/// 同一烧录串口（BurnSerial）的并发执行被进程内键控互斥串行化（审计 BM-03）；
+/// 跨进程共用同一串口需外部互斥（SDK 无跨进程协调）。
 /// </summary>
 public sealed class BurnWorker
 {
     private const int MaxRetries = 2;
     private const int RetryDelayMs = 1000;
+
+    /// <summary>审计 BM-03：按烧录串口键控的执行互斥（进程内；条目生命周期=进程，烧录机串口数量有限）</summary>
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> SerialGates = new();
 
     /// <summary>
     /// 轮询模式默认查询间隔（v0.6.3：50ms → 30ms。真机实测 2026-08-22（COM9/00911007，9600 波特）：
@@ -53,8 +59,33 @@ public sealed class BurnWorker
     public BurnWorker(Func<ISerialChannel> channelFactory, Action<string>? status = null, int baudRate = 9600)
     {
         _channelFactory = channelFactory;
-        _status = status;
+        _status = WrapStatusCallback(status);   // 审计 BM-03：宿主状态回调与控制流隔离（MC-01 同族）
         _baudRate = baudRate;
+    }
+
+    /// <summary>
+    /// 宿主状态回调与控制流隔离（审计 BM-03）：回调（UI/日志）异常不得被当作烧录错误，
+    /// 否则指令已发送后回调抛异常会触发整轮重试、重发清空/烧录指令（对同一芯片二次烧录）。
+    /// 仅 Debug 记录便于宿主排查自身缺陷，Release 零开销。
+    /// </summary>
+    private static Action<string>? WrapStatusCallback(Action<string>? status)
+    {
+        if (status is null)
+        {
+            return null;
+        }
+
+        return message =>
+        {
+            try
+            {
+                status(message);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[BurnMachine] 状态回调异常已隔离: {ex}");
+            }
+        };
     }
 
     /// <param name="request">单点烧录请求（BurnTimeSeconds 仅作请求记录，实际等待由 pollingTimeoutMs 决定）</param>
@@ -71,6 +102,28 @@ public sealed class BurnWorker
     {
         ValidatePollingParameters(pollingIntervalMs, pollingTimeoutMs);
 
+        // 审计 BM-03：按烧录串口键控互斥——同一 BurnSerial 的并发执行串行化
+        // （防同口并发争抢；不同串口互不影响；跨进程需外部互斥）
+        var gate = SerialGates.GetOrAdd(request.BurnSerial, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await ExecuteCoreAsync(request, ct, pollingIntervalMs, pollingTimeoutMs, pollingQuery)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<BurnOutcome> ExecuteCoreAsync(
+        BurnRequest request,
+        CancellationToken ct,
+        int pollingIntervalMs,
+        int pollingTimeoutMs,
+        PollingQueryKind pollingQuery)
+    {
         for (var retry = 0; retry < MaxRetries; retry++)
         {
             ISerialChannel? ser = null;
