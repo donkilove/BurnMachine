@@ -99,8 +99,9 @@ public static class BurnProtocol
 
     /// <summary>
     /// 解析 UID 扩展查询响应（U 命令回复）：前 6 段与 C 回复同构，第 7 段为 UID 区（固定 50 字符）。
-    /// 需要固件版本 &gt; 20240103000000 才支持。第 7 段缺失 → Kind=FormatError 且 Uid=null；
-    /// 第 7 段内容畸形/数据不足 → 仅 Uid=null（不抛异常）。
+    /// 需要固件版本 &gt; 20240103000000 才支持。第 7 段缺失（旧固件/6 段帧）→ 保留 Base 判定
+    /// （Kind/Status 原样，结果码 0 仍判成功），仅 Uid=null（审计 BM-01：不再降级 FormatError，
+    /// 防成功帧被误判"烧录超时"NG）；第 7 段内容畸形/数据不足 → 仅 Uid=null（不抛异常）。
     /// </summary>
     public static UidQueryResult ParseUidResponse(string? response, string burnId)
     {
@@ -113,8 +114,9 @@ public static class BurnProtocol
         var parts = response!.Trim().Split('|');
         if (parts.Length < 7)
         {
-            return new UidQueryResult(
-                new BurnResult(BurnResultKind.FormatError, "响应格式错误：UID区缺失", null, null, null, null), null);
+            // 审计 BM-01：6 段有效帧（结果码 0/1）缺 UID 区——保留 Base 判定（成功/失败），
+            // 仅 Uid=null；此前改判 FormatError 使成功帧 Status=null → 轮询空转至超时误判 NG
+            return new UidQueryResult(baseResult, null);
         }
 
         return new UidQueryResult(baseResult, TryParseUidZone(parts[6]));

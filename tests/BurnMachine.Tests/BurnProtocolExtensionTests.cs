@@ -229,10 +229,23 @@ public class BurnProtocolExtensionTests
     }
 
     [Fact]
-    public void ParseUid_MissingUidZone_UidNull_FormatError()
+    public void ParseUid_MissingUidZone_KeepsBaseKind_UidNull()
     {
+        // 审计 BM-01：6 段有效帧（结果码 0）缺 UID 区——保留 Success 判定，仅 Uid=null
+        // （此前改判 FormatError 使成功帧被误判"烧录超时"NG）
         var r = BurnProtocol.ParseUidResponse("`U00881289|00000001|0000|00000000|FFFFFFFFFFFFFFFF|0\r\n", BurnId);
-        Assert.Equal(BurnResultKind.FormatError, r.Base.Kind);
+        Assert.Equal(BurnResultKind.Success, r.Base.Kind);
+        Assert.Equal(BurnStatus.Success, r.Base.Status);
+        Assert.Null(r.Uid);
+    }
+
+    [Fact]
+    public void ParseUid_MissingUidZone_FailureFrame_KeepsFailure()
+    {
+        // 6 段失败帧（结果码 1）：保留 Failure 判定，仅 Uid=null
+        var r = BurnProtocol.ParseUidResponse("`U00881289|00000001|0000|00000000|FFFFFFFFFFFFFFFF|1\r\n", BurnId);
+        Assert.Equal(BurnResultKind.Failure, r.Base.Kind);
+        Assert.Equal(BurnStatus.Failed, r.Base.Status);
         Assert.Null(r.Uid);
     }
 

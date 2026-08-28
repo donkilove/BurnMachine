@@ -140,6 +140,26 @@ public class BurnWorkerPollingTests
     }
 
     [Fact]
+    public async Task Polling_UidQuery_SixSegmentSuccessFrame_NotMisjudgedAsTimeout()
+    {
+        // 审计 BM-01：6 段有效帧（结果码 0）缺 UID 区——首轮即判成功，
+        // 不再空转至超时误判 NG（旧固件/异常帧形态）
+        var sixSegmentSuccess = "`U00881289|00000001|0000|00000000|FFFFFFFFFFFFFFFF|0\r\n";
+        var port = new ScriptedPollingChannel([sixSegmentSuccess]);
+        var worker = new BurnWorker(() => port);
+
+        var outcome = await worker.ExecuteAsync(
+            NewRequest(), CancellationToken.None,
+            pollingIntervalMs: 50, pollingTimeoutMs: 1000,
+            pollingQuery: PollingQueryKind.U);
+
+        Assert.True(outcome.Success);
+        Assert.Equal(BurnResultKind.Success, outcome.Kind);
+        Assert.Equal(1, port.Writes.Count(w => w.StartsWith("`U")));   // 首轮即成功，不空转
+        Assert.Null(outcome.Uid);
+    }
+
+    [Fact]
     public async Task Polling_UidQuery_Timeout_ReturnsFailure()
     {
         var port = new ScriptedPollingChannel([UidInProgress]);   // 永远"烧录中"
