@@ -171,7 +171,7 @@ public class BurnWorkerPollingTests
             pollingQuery: PollingQueryKind.U);
 
         Assert.False(outcome.Success);
-        Assert.Equal(BurnResultKind.Failure, outcome.Kind);
+        Assert.Equal(BurnResultKind.Timeout, outcome.Kind);   // 审计 BM-02：超时独立 Kind（原 Failure）
         Assert.Contains("超时", outcome.Detail);
     }
 
@@ -283,7 +283,7 @@ public class BurnWorkerPollingTests
             pollingIntervalMs: 200, pollingTimeoutMs: 300);
 
         Assert.False(outcome.Success);
-        Assert.Equal(BurnResultKind.Failure, outcome.Kind);
+        Assert.Equal(BurnResultKind.Timeout, outcome.Kind);   // 审计 BM-02：超时独立 Kind（原 Failure）
         Assert.Contains("超时", outcome.Detail);
         Assert.True(port.Writes.Count(w => w.StartsWith("`C")) >= 2);   // 至少轮询 2 次后才超时
     }

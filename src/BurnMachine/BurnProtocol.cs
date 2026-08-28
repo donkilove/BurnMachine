@@ -15,6 +15,8 @@ public enum BurnResultKind
     FormatError,
     /// <summary>解析过程异常（如末段为空导致索引越界）</summary>
     Error,
+    /// <summary>轮询总超时未出结果（审计 BM-02：与真实失败区分；SDK 内为正常返回值不触发重试）</summary>
+    Timeout,
 }
 
 /// <summary>

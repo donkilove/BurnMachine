@@ -172,7 +172,7 @@ public sealed class BurnWorker
             {
                 var msg = $"烧录超时：{timeoutMs}ms 内未查询到完成结果";
                 _status?.Invoke(msg);
-                return new BurnOutcome(false, BurnResultKind.Failure, msg);
+                return new BurnOutcome(false, BurnResultKind.Timeout, msg);   // 审计 BM-02：超时独立 Kind
             }
 
             ser.Write(query);
@@ -217,7 +217,7 @@ public sealed class BurnWorker
             {
                 var msg = $"烧录超时：{timeoutMs}ms 内未查询到完成结果";
                 _status?.Invoke(msg);
-                return new BurnOutcome(false, BurnResultKind.Failure, msg);
+                return new BurnOutcome(false, BurnResultKind.Timeout, msg);   // 审计 BM-02：超时独立 Kind
             }
 
             _status?.Invoke($"烧录进行中（第{round}次查询，已等待{sw.ElapsedMilliseconds}ms）");

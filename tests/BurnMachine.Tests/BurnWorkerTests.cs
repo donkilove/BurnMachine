@@ -50,7 +50,7 @@ public class BurnWorkerTests
         var outcome = await worker.ExecuteAsync(NewRequest(), CancellationToken.None, pollingTimeoutMs: 300);
 
         Assert.False(outcome.Success);
-        Assert.Equal(BurnResultKind.Failure, outcome.Kind);   // v0.6.0：无响应持续到超时 → 失败（原固定模式为 NoResponse）
+        Assert.Equal(BurnResultKind.Timeout, outcome.Kind);   // 审计 BM-02：超时独立 Kind（原 Failure）
         Assert.Contains("超时", outcome.Detail);
     }
 
